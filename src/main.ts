@@ -9,7 +9,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <header><a class="brand" href="https://github.com/yzh119/h3-battle-lab" target="_blank" rel="noreferrer">H3 <span>BATTLE LAB</span></a><div class="top-label">战场实验室 <span>01 / 林地</span></div><div class="live"><i></i> 实时 3D</div></header>
   <aside class="panel"><div class="eyebrow">战场视角</div><h1>走进战场。</h1><p class="intro">换一个角度，看清每一次交锋。</p><select id="unit-picker" aria-label="选择兵种"><option value="azure">骷髅兵</option><option value="ember">僵尸</option></select>
   <div class="section-label">镜头</div><div class="button-row"><button id="overview" class="active">全局</button><button id="closeup">兵种特写</button></div>
-  <div class="section-label">场景</div><select id="background-picker" aria-label="战场背景"><option value="">自由 3D 场景</option></select><p id="scene-hint" class="intro">拖动旋转镜头</p><div class="section-label">环境</div><div class="button-row"><button id="day" class="active">暖阳</button><button id="dusk">阴天</button></div>
+  <div class="button-row zoom-controls"><button id="zoom-out" aria-label="缩小战场">− 缩小</button><button id="zoom-in" aria-label="放大战场">＋ 放大</button></div><div class="section-label">场景</div><select id="background-picker" aria-label="战场背景"><option value="">自由 3D 场景</option></select><p id="scene-hint" class="intro">拖动旋转镜头</p><div class="section-label">环境</div><div class="button-row"><button id="day" class="active">暖阳</button><button id="dusk">阴天</button></div>
   <label class="switch"><span>显示六角格</span><input id="grid" type="checkbox"></label>
   <label class="switch"><span>实时阴影</span><input id="shadows" type="checkbox" checked></label>
   <label class="range"><span>画面精细度 <b id="quality-label">高</b></span><input id="quality" aria-label="画面精细度" type="range" min="1" max="2" step=".5" value="2"></label>
@@ -106,6 +106,8 @@ async function attack(defender: UnitView) {
 }
 
 function toggleButtons(a: string, b: string, active: string) { $(a).classList.toggle('active', active === a); $(b).classList.toggle('active', active === b); }
+$('#zoom-in').onclick = () => world.zoomBy(1.2);
+$('#zoom-out').onclick = () => world.zoomBy(1 / 1.2);
 $('#overview').onclick = () => { world.resetCamera(); toggleButtons('#overview', '#closeup', '#overview'); };
 $('#unit-picker').onchange = event => {
   if (busy) { $<HTMLSelectElement>('#unit-picker').value = selected.unit.id; return; }
@@ -142,7 +144,7 @@ async function importManifest(data: Manifest) {
 $<HTMLSelectElement>('#background-picker').onchange = async event => {
   const url = (event.target as HTMLSelectElement).value;
   try {
-    if (url) { await world.setBackdrop(url); $('#scene-hint').textContent = '高清背景 · 固定视角 · 实时 3D 兵种'; }
+    if (url) { await world.setBackdrop(url); $('#scene-hint').textContent = '高清背景 · 滚轮缩放 · 全局复位'; }
     else { world.freeCamera(); world.resetCamera(); $('#scene-hint').textContent = '拖动旋转镜头'; }
     toggleButtons('#overview', '#closeup', '#overview');
   } catch { message('背景载入失败，保留当前场景。'); }
@@ -152,7 +154,7 @@ async function boot() {
     const response = await fetch('/local-assets/manifest.json');
     if (response.ok && response.headers.get('content-type')?.includes('json')) { const data = await response.json(); if (data.units) { manifest = data; await importManifest(data);
       for (const background of data.backgrounds ?? []) { const option = new Option(background.label, background.url); $<HTMLSelectElement>('#background-picker').add(option); }
-      if (data.backgrounds?.length) { await world.setBackdrop(data.backgrounds[0].url); $<HTMLSelectElement>('#background-picker').value = data.backgrounds[0].url; $('#scene-hint').textContent = '高清背景 · 固定视角 · 实时 3D 兵种'; }
+      if (data.backgrounds?.length) { await world.setBackdrop(data.backgrounds[0].url); $<HTMLSelectElement>('#background-picker').value = data.backgrounds[0].url; $('#scene-hint').textContent = '高清背景 · 滚轮缩放 · 全局复位'; }
     } }
   } catch { message('本地美术未载入；基础场景可正常使用。'); }
   $('#loading').classList.add('hidden');
@@ -163,5 +165,5 @@ world.renderer.setAnimationLoop(() => {
   frames++; if (performance.now() - last > 1000) { $('#fps').textContent = `${Math.round(frames * 1000 / (performance.now() - last))} FPS`; frames = 0; last = performance.now(); }
 });
 // Diagnostics and interaction hooks for renderer integration and browser checks.
-Object.assign(window, { battleLab: { snapshot: () => ({ busy, backdrop: world.isBackdrop(), grid: world.grid.visible, units: views.map(v => ({ id: v.unit.id, hp: v.unit.hp, cell: v.unit.cell, imported: v.imported, animation: v.current, clips: v.clips.map(c => c.name), pose: v.poseSignature() })), draws: world.renderer.info.render.calls }), move, attack: () => attack(views.find(v => v.unit.team !== selected.unit.team)!) } });
+Object.assign(window, { battleLab: { snapshot: () => ({ busy, backdrop: world.isBackdrop(), zoom: world.camera.zoom, grid: world.grid.visible, units: views.map(v => ({ id: v.unit.id, hp: v.unit.hp, cell: v.unit.cell, imported: v.imported, animation: v.current, clips: v.clips.map(c => c.name), pose: v.poseSignature() })), draws: world.renderer.info.render.calls }), move, attack: () => attack(views.find(v => v.unit.team !== selected.unit.team)!) } });
 boot();

@@ -101,7 +101,26 @@ export function createWorld(canvas: HTMLCanvasElement) {
     const w = canvas.clientWidth, h = canvas.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
   }
   const observer = new ResizeObserver(resize); observer.observe(canvas); window.addEventListener('resize', resize); resize();
+  function zoomBy(factor: number) {
+    if (plateMode && backdrop) {
+      camera.zoom = THREE.MathUtils.clamp(camera.zoom * factor, 1, 3);
+      backdrop.repeat.setScalar(1 / camera.zoom);
+      backdrop.offset.setScalar((1 - 1 / camera.zoom) / 2);
+      camera.updateProjectionMatrix();
+    } else {
+      const offset = camera.position.clone().sub(controls.target);
+      offset.setLength(THREE.MathUtils.clamp(offset.length() / factor, controls.minDistance, controls.maxDistance));
+      camera.position.copy(controls.target).add(offset); controls.update();
+    }
+  }
+  canvas.addEventListener('wheel', event => {
+    if (!plateMode) return;
+    event.preventDefault();
+    const pixels = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? canvas.clientHeight : 1);
+    zoomBy(Math.exp(-THREE.MathUtils.clamp(pixels, -300, 300) * .002));
+  }, { passive: false });
   function applyMode(enabled: boolean) {
+    camera.zoom = 1; camera.updateProjectionMatrix();
     plateMode = enabled; scenery.visible = !enabled; shadowFloor.visible = enabled; controls.enabled = !enabled;
     scene.fog = enabled ? null : new THREE.Fog('#9aa79f', 38, 115);
     scene.background = enabled && backdrop ? backdrop : new THREE.Color('#9aa79f'); resize();
@@ -116,6 +135,7 @@ export function createWorld(canvas: HTMLCanvasElement) {
   function freeCamera() { plateRequest++; applyMode(false); }
   function frameUnit(position: THREE.Vector3) { freeCamera(); controls.target.copy(position).add(new THREE.Vector3(0, 1.1, 0)); camera.position.copy(position).add(new THREE.Vector3(4.4, 3.5, 5.8)); controls.update(); }
   function resetCamera() {
+    camera.zoom = 1; if (backdrop) { backdrop.repeat.setScalar(1); backdrop.offset.setScalar(0); } camera.updateProjectionMatrix();
     if (plateMode) { camera.position.set(0, 26, 32); controls.target.set(0, 0, 0); camera.lookAt(controls.target); }
     else { camera.position.set(12, 19, 27); controls.target.set(0, .8, 0); controls.update(); }
   }
@@ -123,5 +143,5 @@ export function createWorld(canvas: HTMLCanvasElement) {
     const bg = dusk ? '#66788a' : '#9aa79f'; if (!plateMode) scene.background = new THREE.Color(bg); scene.fog?.color.set(bg);
     sun.color.set(dusk ? '#bacfea' : '#ffe0a4'); sun.intensity = dusk ? 1.8 : 3.2; ambient.intensity = dusk ? .8 : 1.25;
   }
-  return { renderer, scene, camera, controls, grid, pickable, hover, showPath, frameUnit, resetCamera, setMood, sun, setBackdrop, freeCamera, isBackdrop: () => plateMode };
+  return { renderer, scene, camera, controls, grid, pickable, hover, showPath, frameUnit, resetCamera, setMood, sun, zoomBy, setBackdrop, freeCamera, isBackdrop: () => plateMode };
 }

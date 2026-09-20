@@ -83,3 +83,5 @@ Meshy supplies source geometry and suitable rigs; Astra authors the local repair
 ### Existing HD battlefield plates
 
 The optional local manifest also accepts `backgrounds: [{ "label": "Grass hills", "url": "/local-assets/grass.png" }]`. The first image becomes the default scene. Images retain their aspect ratio in a fitted viewport. A locked perspective camera, animated 3D units and a transparent shadow receiver composite over the image. Switching to a unit close-up or the free scene restores the procedural 3D environment. A background photograph/redraw does not provide geometry, parallax or image-derived occlusion; lighting controls affect the 3D objects, not the baked image. Background images stay private alongside models.
+
+HD background mode supports mouse-wheel and +/− button zoom from 1× to 3×. The camera projection and image UV crop scale together about the viewport center, keeping feet, shadows and painted ground aligned. Overview resets the crop. This is magnification of existing detail, not additional image resolution.

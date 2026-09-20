@@ -26,6 +26,14 @@ test('local GLB assets load and expose baked clips when available', async ({ pag
   await page.goto('/'); await page.waitForFunction(() => !!(window as any).battleLab); await expect(page.locator('#loading')).toBeHidden({ timeout: 60000 });
   await expect(page.locator('#background-picker option')).toHaveCount(15);
   expect(await page.evaluate(() => (window as any).battleLab.snapshot().backdrop)).toBe(true);
+  await page.locator('#battle').hover();
+  await page.mouse.wheel(0, -250);
+  await expect.poll(() => page.evaluate(() => (window as any).battleLab.snapshot().zoom)).toBeGreaterThan(1.5);
+  await page.screenshot({ path: '.local/hd-battle-zoom.png' });
+  await page.getByRole('button', { name: '缩小战场' }).click();
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().zoom)).toBeLessThan(1.5);
+  await page.getByRole('button', { name: '全局', exact: true }).click();
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().zoom)).toBe(1);
   await page.screenshot({ path: '.local/hd-battle.png' });
   await page.locator('#background-picker').selectOption({ index: 2 });
   await expect.poll(() => page.evaluate(() => (window as any).battleLab.snapshot().backdrop)).toBe(true);
