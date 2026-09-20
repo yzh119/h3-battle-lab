@@ -1,0 +1,56 @@
+import { test, expect } from '@playwright/test';
+
+test('public checkout renders without private art and supports movement and combat', async ({ page }) => {
+  await page.route('**/local-assets/**', route => route.fulfill({ status: 404, body: '' }));
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/'); await page.waitForFunction(() => !!(window as any).battleLab); await expect(page.locator('#loading')).toBeHidden();
+  await expect.poll(() => page.evaluate(() => (window as any).battleLab.snapshot().draws)).toBeGreaterThan(0);
+  await page.locator('#grid').check();
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().grid)).toBe(true);
+  await page.getByRole('button', { name: '兵种特写' }).click();
+  await page.getByRole('button', { name: '行走', exact: true }).click();
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[0].animation)).toBe('walk');
+  await page.evaluate(async () => { await (window as any).battleLab.move({ q: 4, r: 5 }); });
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[0].cell)).toEqual({ q: 4, r: 5 });
+  await page.evaluate(async () => { await (window as any).battleLab.attack(); });
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[1].hp)).toBe(75);
+  await page.getByRole('button', { name: '重置战场' }).click();
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[1].hp)).toBe(100);
+  expect(errors).toEqual([]);
+});
+
+test('local GLB assets load and expose baked clips when available', async ({ page, request }) => {
+  const response = await request.get('/local-assets/manifest.json');
+  test.skip(!response.headers()['content-type']?.includes('json'), 'Private art is intentionally absent from the public repository');
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/'); await page.waitForFunction(() => !!(window as any).battleLab); await expect(page.locator('#loading')).toBeHidden({ timeout: 60000 });
+  await expect(page.locator('#background-picker option')).toHaveCount(15);
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().backdrop)).toBe(true);
+  await page.screenshot({ path: '.local/hd-battle.png' });
+  await page.locator('#background-picker').selectOption({ index: 2 });
+  await expect.poll(() => page.evaluate(() => (window as any).battleLab.snapshot().backdrop)).toBe(true);
+  await page.locator('#background-picker').selectOption('');
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().backdrop)).toBe(false);
+  const snapshot = await page.evaluate(() => (window as any).battleLab.snapshot());
+  expect(snapshot.units.every((u: any) => u.imported)).toBe(true);
+  expect(snapshot.units[0].clips).toEqual(expect.arrayContaining(['idle', 'walk', 'attack', 'hit', 'death']));
+  await page.getByRole('button', { name: '行走', exact: true }).click();
+  await page.waitForTimeout(220);
+  const pose = await page.evaluate(() => (window as any).battleLab.snapshot().units[0].pose);
+  expect(pose.length).toBeGreaterThan(0);
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[0].pose)).not.toBe(pose);
+  await page.getByRole('button', { name: '兵种特写' }).click();
+  await page.getByRole('button', { name: '攻击', exact: true }).click();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: '.local/battle-closeup.png' });
+  await page.getByRole('button', { name: '全局', exact: true }).click();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: '.local/battle-overview.png' });
+  await page.locator('#unit-picker').selectOption('ember');
+  await page.getByRole('button', { name: '兵种特写' }).click();
+  await page.getByRole('button', { name: '行走', exact: true }).click();
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: '.local/zombie-closeup.png' });
+  expect(errors).toEqual([]);
+});

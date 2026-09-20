@@ -1,0 +1,14 @@
+node_modules/
+dist/
+public/local-assets/
+.local/
+.env*
+!.env.example
+test-results/
+playwright-report/
+*.glb
+*.gltf
+*.blend
+*.blend1
+*.bin
+.DS_Store
