@@ -2,3 +2,5 @@
 #unit-picker,#background-picker{width:100%;padding:9px 10px;color:#d8ddc8;background:#25332e;border:1px solid #d2d5b32a;border-radius:3px;font:11px inherit;outline-offset:3px}
 
 .zoom-controls{margin-top:6px}
+
+#army-editor{font-size:11px;color:#b6c1b7}#army-editor label{display:block;margin:12px 0 5px}#army-editor summary{padding:8px 0;color:#e3d5ab}#creature-picker,#team-picker{width:100%;padding:9px;color:#d8ddc8;background:#25332e;border:1px solid #d2d5b32a;border-radius:3px}#army-editor[aria-busy=true]{opacity:.65}#army-editor[aria-busy=true] button{pointer-events:none}select:focus-visible{outline:2px solid #e5cb87;outline-offset:3px}

@@ -2,7 +2,7 @@
 
 An independent Three.js battlefield prototype for the generative-art work on Heroes of Might and Magic III. It displays actual 3D models and skeletal animation, with an orbiting camera, realtime shadows and a hex battlefield.
 
-**Code is public. Imported models, textures, Blender scenes and complete mods are not included.** A fresh checkout runs with procedural stand-ins. The local art workflow adds existing skeleton and zombie models without changing the public repository.
+**Code is public. Imported models, textures, Blender scenes and complete mods are not included.** A fresh checkout runs with procedural stand-ins. The local art workflow can load Skeleton, Zombie, Wight, Wraith, Swordsman and Crusader models. Castle art remains draft material; adding it to this viewer does not establish appearance acceptance.
 
 ## Run
 
@@ -15,7 +15,13 @@ npm run dev -- --port 5174
 
 Open the localhost URL. Drag to orbit, scroll to zoom, and right-drag to pan. Select a unit from the menu, or click a friendly unit. Click the ground to move up to eight hexes; click an opposing unit to approach and perform a basic melee attack. The close-up view and animation buttons inspect the original 3D asset.
 
-The battlefield currently uses code-generated terrain, trees, rocks and grass. These are scene scaffolding; environment artwork is a later step.
+The local scene can reuse the existing HD battlefield plates. The public fallback uses procedural terrain, trees, rocks and grass.
+
+## Army editor
+
+Use **配置双方阵容** to choose a creature and team, then **添加上场**. Each team supports up to seven units. **替换选中** replaces the currently selected unit at the same cell and on the same team; **移除选中单位** removes it. The top menu selects any unit on either team. Reset restores the configured composition and deployment with full health. Configuration lasts for the current page session.
+
+Available local manifest entries populate the grouped creature catalogue. Entries without local artwork are explicitly marked as geometric stand-ins. Models load on demand and share downloaded assets, while each placed unit has its own skeleton and animation mixer. Failed replacements preserve the previous unit. Castle drafts remain marked in the selector.
 
 ## Local models
 
@@ -24,8 +30,8 @@ The sidebar accepts a self-contained `.glb` file. For automatic loading, place a
 ```json
 {
   "units": {
-    "skeleton": {"label": "骷髅兵", "url": "/local-assets/skeleton.glb", "height": 2.35},
-    "zombie": {"label": "僵尸", "url": "/local-assets/zombie.glb", "height": 2.35}
+    "skeleton": {"label": "骷髅兵", "url": "/local-assets/skeleton.glb", "height": 2.35, "faction": "墓园"},
+    "zombie": {"label": "僵尸", "url": "/local-assets/zombie.glb", "height": 2.35, "faction": "墓园"}
   }
 }
 ```
@@ -40,6 +46,8 @@ blender -b --python-exit-code 1 --python scripts/export-blender.py -- \
   --source skeleton=/absolute/path/to/skeleton-scenes \
   --source zombie=/absolute/path/to/zombie-scenes
 ```
+
+For mixed source directories, `--config /private/export.json` accepts `{"units":{"creature-id":{"label":"Name","faction":"Castle","draft":true,"scenes":{"idle":"/private/holding.blend","walk":"/private/moving.blend","attack":"/private/attack.blend","hit":"/private/hit.blend","death":"/private/death.blend"}}}}`. Configuration files containing source paths stay private. Exporting merges units into the existing local manifest and preserves backgrounds.
 
 Each source folder contains `holding.blend`, `moving.blend`, `attack_front.blend`, `hitted.blend`, and `death.blend`. The exporter bakes scene animations, matches animation targets by unique node name, and packs all five clips into one GLB per creature so geometry and textures are not downloaded five times. This assumes all five scenes share the same geometry, rig and stable node names. Materials need inspection after export; Blender-specific shader nodes do not all translate to glTF.
 
@@ -69,7 +77,7 @@ npm run test:e2e
 npm run check:public
 ```
 
-The browser suite tests the no-art fallback, camera controls, hex movement and melee damage. When local assets exist, it also checks GLB loading, exported clip names and actual bone-transform changes. Local screenshots stay in `.local/`. To use an existing Chromium installation, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`.
+The browser suite tests the no-art fallback, camera controls, hex movement, melee damage, army selection, replacement, removal, reset and team capacity. When local assets exist, it also checks GLB loading, exported clip names and actual bone-transform changes. Local screenshots stay in `.local/`. To use an existing Chromium installation, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`.
 
 ## Related work
 

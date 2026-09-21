@@ -4,7 +4,7 @@ import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { type Unit } from './battle.ts';
 import { worldPosition } from './world.ts';
 
-export interface Asset { label: string; url: string; height?: number }
+export interface Asset { label: string; url: string; height?: number; faction?: string; draft?: boolean }
 export interface Manifest { backgrounds?: { label: string; url: string }[]; units: Record<string, Asset> }
 const loader = new GLTFLoader();
 const cache = new Map<string, Promise<GLTF>>();
@@ -40,6 +40,8 @@ export class UnitView {
   private animationTime = 0;
   private remaining = 0;
   imported = false;
+  private assetRevision = 0;
+  private disposed = false;
   poseSignature(): string {
     const transforms: number[] = [];
     this.model.traverse(object => {
@@ -56,7 +58,10 @@ export class UnitView {
     this.proxy.position.y = 1.3; this.proxy.userData.unitId = unit.id; this.root.add(this.proxy);
   }
   async setAsset(asset: Asset): Promise<void> {
-    const gltf = await load(asset.url); const model = clone(gltf.scene);
+    const revision = ++this.assetRevision;
+    const gltf = await load(asset.url);
+    if (this.disposed || revision !== this.assetRevision) return;
+    const model = clone(gltf.scene);
     model.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(model); const height = box.max.y - box.min.y;
     if (!Number.isFinite(height) || height <= 0) throw new Error('模型没有有效的立体尺寸');
@@ -65,9 +70,31 @@ export class UnitView {
     model.traverse(object => {
       if (object instanceof THREE.Mesh) { object.castShadow = true; object.receiveShadow = true; }
     });
+    this.mixer?.stopAllAction();
+    if (this.mixer) this.mixer.uncacheRoot(this.mixer.getRoot());
+    this.disposeDummy();
     this.root.remove(this.model); this.model = wrapper; this.root.add(wrapper); this.dummy = undefined;
     this.clips = gltf.animations; this.mixer = new THREE.AnimationMixer(model); this.action = undefined;
     this.imported = true; this.current = ''; this.play('idle');
+  }
+  private disposeDummy(): void {
+    if (this.dummy) this.dummy.root.traverse(object => {
+      if (object instanceof THREE.Mesh) {
+        object.geometry.dispose();
+        for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose();
+      }
+    });
+    this.dummy = undefined;
+  }
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true; this.assetRevision++;
+    this.mixer?.stopAllAction();
+    if (this.mixer) this.mixer.uncacheRoot(this.mixer.getRoot());
+    this.disposeDummy();
+    this.ring.geometry.dispose(); this.ring.material.dispose();
+    this.proxy.geometry.dispose(); (this.proxy.material as THREE.Material).dispose();
+    this.root.removeFromParent();
   }
   play(name: string, once = false): number {
     this.current = name; this.animationTime = 0;

@@ -81,18 +81,24 @@ def pack_clips(exports, output):
 
 args = argparse.ArgumentParser()
 args.add_argument('--out', type=Path, required=True)
-args.add_argument('--source', action='append', required=True, help='id=/directory/of/blend/scenes')
+args.add_argument('--source', action='append', default=[], help='id=/directory/of/blend/scenes')
+args.add_argument('--config', type=Path, help='Private JSON with units and per-clip scene paths')
 opts = args.parse_args(sys.argv[sys.argv.index('--') + 1:])
 opts.out.mkdir(parents=True, exist_ok=True)
-manifest = {'units': {}}
+manifest_path = opts.out / 'manifest.json'
+manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {'units': {}}
+entries = json.loads(opts.config.read_text())['units'] if opts.config else {}
 labels = {'skeleton': '骷髅兵', 'zombie': '僵尸'}
 for item in opts.source:
     identifier, directory = item.split('=', 1)
+    entries[identifier] = {'directory': directory}
+assert entries, 'Provide --source or --config'
+for identifier, entry in entries.items():
     assert identifier.replace('-', '').isalnum(), 'Use a simple creature identifier'
     exports = []
     with tempfile.TemporaryDirectory(prefix='battle-export-') as temporary:
         for action, filename in [('idle', 'holding'), ('walk', 'moving'), ('attack', 'attack_front'), ('hit', 'hitted'), ('death', 'death')]:
-            source = Path(directory) / (filename + '.blend')
+            source = Path(entry['scenes'][action]) if 'scenes' in entry else Path(entry['directory']) / (filename + '.blend')
             bpy.ops.wm.open_mainfile(filepath=str(source))
             scene = bpy.context.scene
             scene.frame_set(scene.frame_start)
@@ -109,7 +115,8 @@ for item in opts.source:
                                       export_cameras=False, export_lights=False)
             exports.append((action, path))
         clips = pack_clips(exports, opts.out / (identifier + '.glb'))
-    manifest['units'][identifier] = {'label': labels.get(identifier, identifier),
-                                    'url': f'/local-assets/{identifier}.glb', 'height': 2.35, 'clips': clips}
+    manifest['units'][identifier] = {'label': entry.get('label', labels.get(identifier, identifier)),
+                                    'url': f'/local-assets/{identifier}.glb', 'height': entry.get('height', 2.35), 'clips': clips,
+                                    'faction': entry.get('faction', '墓园'), 'draft': entry.get('draft', False)}
     print('EXPORTED', identifier, clips, flush=True)
 (opts.out / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
