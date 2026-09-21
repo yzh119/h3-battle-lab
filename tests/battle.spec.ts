@@ -64,15 +64,21 @@ test('local GLB assets load and expose baked clips when available', async ({ pag
 });
 
 test('army editor changes both teams, preserves composition on reset and enforces capacity', async ({ page }) => {
+  // Capacity checks do not need expensive software-rendered shadows; other tests cover the default renderer.
+  await page.setViewportSize({ width: 1000, height: 760 });
   await page.route('**/local-assets/**', route => route.fulfill({ status: 404, body: '' }));
   await page.goto('/'); await expect(page.locator('#loading')).toBeHidden();
+  await page.locator('#shadows').uncheck();
   await page.locator('#creature-picker').selectOption('crusader');
   await expect(page.locator('#creature-note')).toContainText('示意模型');
   await page.locator('#replace-unit').click();
   await expect.poll(() => page.evaluate(() => (window as any).battleLab.snapshot().units[0].kind)).toBe('crusader');
   await page.locator('#team-picker').selectOption('1');
   await page.locator('#creature-picker').selectOption('swordsman');
-  for (let i = 0; i < 6; i++) await page.locator('#add-unit').click();
+  for (let i = 0; i < 6; i++) {
+    await page.locator('#add-unit').click();
+    await expect(page.locator('#unit-picker option')).toHaveCount(i + 3);
+  }
   let units = await page.evaluate(() => (window as any).battleLab.snapshot().units);
   expect(units.filter((u: any) => u.team === 1)).toHaveLength(7);
   expect(new Set(units.map((u: any) => JSON.stringify(u.cell))).size).toBe(8);
