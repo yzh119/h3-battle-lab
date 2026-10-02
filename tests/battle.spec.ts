@@ -10,12 +10,22 @@ test('public checkout renders without private art and supports movement and comb
   await page.getByRole('button', { name: '兵种特写' }).click();
   await page.getByRole('button', { name: '行走', exact: true }).click();
   expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[0].animation)).toBe('walk');
+  await page.locator('#start-battle').click();
   await page.evaluate(async () => { await (window as any).battleLab.move({ q: 4, r: 5 }); });
   expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[0].cell)).toEqual({ q: 4, r: 5 });
+  await expect(page.locator('#turn-status')).toContainText('红方');
+  await page.locator('#defend-turn').click();
+  await expect(page.locator('#turn-status')).toContainText('第 2 回合');
   await page.evaluate(async () => { await (window as any).battleLab.attack(); });
-  expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[1].hp)).toBe(75);
+  const defender = await page.evaluate(() => (window as any).battleLab.snapshot().units[1]);
+  expect(defender.hp).toBeGreaterThanOrEqual(242); expect(defender.hp).toBeLessThanOrEqual(281);
+  expect(defender.count).toBe(Math.ceil(defender.hp / 15));
+  await expect(page.locator('#combat-log')).toContainText('击杀');
+  await expect(page.locator('#combat-log')).toContainText('反击');
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[0].hp)).toBeLessThan(120);
+  await expect(page.locator('#replace-unit')).toBeDisabled();
   await page.getByRole('button', { name: '重置战场' }).click();
-  expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[1].hp)).toBe(100);
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[1].hp)).toBe(300);
   expect(errors).toEqual([]);
 });
 
@@ -126,4 +136,62 @@ test('failed model replacement leaves the existing army usable', async ({ page }
   await expect(page.locator('#toast')).toContainText('原阵容已保留');
   const state = await page.evaluate(() => (window as any).battleLab.snapshot());
   expect(state.units.map((u: any) => u.kind)).toEqual(['skeleton', 'zombie']); expect(state.busy).toBe(false);
+});
+
+test('stack editor validates numbers, labels quantities and resets wounded stacks', async ({ page }) => {
+  await page.route('**/local-assets/**', route => route.fulfill({ status: 404, body: '' }));
+  await page.goto('/'); await expect(page.locator('#loading')).toBeHidden();
+  await page.locator('#stack-count').fill('37'); await page.locator('#apply-count').click();
+  await expect(page.locator('#hp')).toContainText('37 只');
+  await expect(page.locator('.stack-badge').first()).toHaveText('37');
+  await page.locator('#stack-count').fill('1.5'); await page.locator('#apply-count').click();
+  await expect(page.locator('#toast')).toContainText('整数');
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[0].count)).toBe(37);
+  await page.locator('#reset').click();
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[0].hp)).toBe(222);
+  await page.locator('#stack-count').fill('12'); await page.locator('#creature-picker').selectOption('swordsman');
+  await page.locator('#replace-unit').click();
+  await expect.poll(() => page.evaluate(() => (window as any).battleLab.snapshot().units[0].hp)).toBe(420);
+  await page.evaluate(async () => { await (window as any).battleLab.move({ q: 4, r: 5 }); });
+  await page.locator('#stack-count').fill('9'); await page.locator('#apply-count').click();
+  await page.locator('#reset').click();
+  const unit = await page.evaluate(() => (window as any).battleLab.snapshot().units[0]);
+  expect(unit.count).toBe(9); expect(unit.cell).toEqual({ q: 3, r: 5 });
+});
+
+test('custom creature packs import, reject bad mechanisms, and fight without artwork', async ({ page }) => {
+  await page.route('**/local-assets/**', route => route.fulfill({ status: 404, body: '' }));
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/'); await expect(page.locator('#loading')).toBeHidden();
+  await page.locator('#creature-import').setInputFiles('examples/custom-creatures.json');
+  await expect(page.locator('#creature-import-status')).toContainText('已导入 1');
+  await expect(page.locator('#creature-picker')).toHaveValue('custom-spectral-guard');
+  await page.locator('#replace-unit').click();
+  await expect.poll(() => page.evaluate(() => (window as any).battleLab.snapshot().units[0].kind)).toBe('custom-spectral-guard');
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[0].hp)).toBe(480);
+  await page.locator('#creature-import').setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ version: 1, creatures: [{ id: 'bad', label: 'Bad', faction: 'Custom', ruleset: 'custom', stats: { health: 10, attack: 5, defense: 5, minDamage: 1, maxDamage: 2, speed: 4 }, mechanisms: [{ type: 'unknown' }] }] })) });
+  await expect(page.locator('#creature-import-status')).toContainText('unsupported mechanism');
+  expect(await page.locator('#creature-picker option[value="bad"]').count()).toBe(0);
+  await page.locator('#start-battle').click();
+  await expect(page.locator('#creature-import')).toBeDisabled();
+  await page.evaluate(async () => { await (window as any).battleLab.attack(); });
+  const snapshot = await page.evaluate(() => (window as any).battleLab.snapshot());
+  expect(snapshot.units[1].hp).toBeLessThan(300);
+  expect(snapshot.units[0].hp).toBe(480); // blocksRetaliation
+  expect(snapshot.units.every((u: any) => !u.imported)).toBe(true);
+  await expect(page.locator('#combat-log p')).toHaveCount(2); // additionalAttacks
+  await expect(page.locator('#combat-log')).not.toContainText('反击');
+  await page.screenshot({ path: '.local/custom-creature-fallback.png' });
+  expect(errors).toEqual([]);
+});
+
+test('local creature data autoloads without an art manifest', async ({ page }) => {
+  await page.route('**/local-assets/**', route => route.fulfill({ status: 404, body: '' }));
+  await page.route('**/local-assets/creatures.json', route => route.fulfill({ path: 'examples/custom-creatures.json', contentType: 'application/json' }));
+  await page.goto('/'); await expect(page.locator('#loading')).toBeHidden();
+  await page.locator('#creature-picker').selectOption('custom-spectral-guard');
+  await page.locator('#replace-unit').click();
+  await expect.poll(() => page.evaluate(() => (window as any).battleLab.snapshot().units[0].kind)).toBe('custom-spectral-guard');
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[0].imported)).toBe(false);
+  await expect(page.locator('#creature-picker option:checked')).toContainText('自定义');
 });

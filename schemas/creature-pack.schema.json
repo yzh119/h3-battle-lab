@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Battle Lab Creature Pack v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "creatures"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "creatures": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "label",
+          "faction",
+          "ruleset",
+          "stats",
+          "mechanisms"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "\\S"
+          },
+          "faction": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "\\S"
+          },
+          "ruleset": {
+            "const": "custom"
+          },
+          "stats": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "health",
+              "attack",
+              "defense",
+              "minDamage",
+              "maxDamage",
+              "speed"
+            ],
+            "properties": {
+              "health": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100000
+              },
+              "attack": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000
+              },
+              "defense": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000
+              },
+              "minDamage": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100000
+              },
+              "maxDamage": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100000
+              },
+              "speed": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
+              }
+            }
+          },
+          "mechanisms": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "flying"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "count"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "additionalAttacks"
+                    },
+                    "count": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 4
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "health"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "regeneration"
+                    },
+                    "health": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "count"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "retaliations"
+                    },
+                    "count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "blocksRetaliation"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "$comment": "Runtime additionally checks minDamage <= maxDamage, unique creature IDs and mechanism types, and registered-ID collisions."
+}

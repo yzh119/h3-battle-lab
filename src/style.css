@@ -4,3 +4,6 @@
 .zoom-controls{margin-top:6px}
 
 #army-editor{font-size:11px;color:#b6c1b7}#army-editor label{display:block;margin:12px 0 5px}#army-editor summary{padding:8px 0;color:#e3d5ab}#creature-picker,#team-picker{width:100%;padding:9px;color:#d8ddc8;background:#25332e;border:1px solid #d2d5b32a;border-radius:3px}#army-editor[aria-busy=true]{opacity:.65}#army-editor[aria-busy=true] button{pointer-events:none}select:focus-visible{outline:2px solid #e5cb87;outline-offset:3px}
+
+#stack-count{width:100%;padding:9px;color:#d8ddc8;background:#25332e;border:1px solid #d2d5b32a;border-radius:3px}#stack-labels{position:absolute;inset:0;pointer-events:none;overflow:hidden}.stack-badge{position:absolute;transform:translate(-50%,4px);background:#14231feb;border:1px solid;border-radius:3px;padding:2px 7px;color:white;font:bold 12px ui-monospace}.rules-note,#combat-log{font-size:10px;line-height:1.6;color:#bac6b5}#combat-log{max-height:120px;overflow:auto}#hp{max-width:170px;line-height:1.6}
+button:disabled,input:disabled{opacity:.45;cursor:default}#start-battle{width:100%;margin-top:12px;color:#e3d5ab}#turn-status{font-size:12px;line-height:1.6;color:#e0dec4}#turn-queue{font-size:10px;line-height:1.6;color:#b6c1b7;overflow-wrap:anywhere}#creature-import-status{overflow-wrap:anywhere}

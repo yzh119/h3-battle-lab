@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "creatures": [
+    {
+      "id": "custom-spectral-guard",
+      "label": "自定义灵卫",
+      "faction": "自定义墓园",
+      "ruleset": "custom",
+      "stats": { "health": 24, "attack": 9, "defense": 8, "minDamage": 4, "maxDamage": 6, "speed": 7 },
+      "mechanisms": [
+        { "type": "flying" },
+        { "type": "additionalAttacks", "count": 1 },
+        { "type": "regeneration", "health": 10 },
+        { "type": "retaliations", "count": 2 },
+        { "type": "blocksRetaliation" }
+      ]
+    }
+  ]
+}
