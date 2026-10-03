@@ -375,5 +375,75 @@ class NativeBackendTests(unittest.TestCase):
             self.assertEqual(self.request('state')['result']['state'], state)
 
 
+    def test_named_hero_catalogue_native_leveling_and_default_spellbooks(self):
+        heroes = self.request('catalogue')['result']['namedHeroes']
+        self.assertEqual([hero['id'] for hero in heroes['heroes']], [*range(16), *range(64, 80)])
+        self.assertTrue(all(hero['specialty'] and hero['description'] for hero in heroes['heroes']))
+        armies = [[{'creature': 3, 'count': 20}], [{'creature': 58, 'count': 100}]]
+        for hero in heroes['heroes']:
+            response = self.request('deployment', seed=1337, armies=armies, heroes=[{'type': hero['id'], 'level': 1}, None])
+            self.assertTrue(response['ok'], response.get('error'))
+            native = response['result']['state']['heroes'][0]
+            self.assertEqual((native['type'], native['label'], native['level'], native['experience']), (hero['id'], hero['label'], 1, 0))
+        params = dict(seed=1337, armies=armies, heroes=[{'type': 71, 'level': 20}, {'type': 73, 'level': 1}])
+        preview = self.request('deployment', **params)['result']['state']
+        state = self.request('create', **params)['result']['state']
+        self.assertEqual(preview['heroes'], state['heroes'])
+        self.assertEqual(preview['units'], state['units'])
+        high = state['heroes'][0]
+        self.assertEqual(high['level'], 20)
+        self.assertEqual(high['experience'], 81961)
+        self.assertEqual(sum(high[key] for key in ['attack', 'defense', 'power', 'knowledge']), 25)  # Six initial points plus nineteen native level-ups.
+        self.assertTrue(2 <= len(high['skills']) <= 8)
+        self.assertEqual([spell['id'] for spell in state['heroes'][1]['spells']], [23])
+        maximum = self.request('deployment', seed=1337, armies=armies, heroes=[{'type': 71, 'level': heroes['maxLevel']}, None])
+        self.assertTrue(maximum['ok'], maximum.get('error'))
+        self.assertEqual(maximum['result']['state']['heroes'][0]['level'], heroes['maxLevel'])
+        self.assertEqual(self.request('state')['result']['state'], state)
+
+    def test_named_creature_specialties_and_manual_overrides_remain_native(self):
+        armies = [[{'creature': 3, 'count': 20}, {'creature': 56, 'count': 20}], [{'creature': 58, 'count': 100}]]
+        for hero, key in [(1, 'core:marksman'), (71, 'core:skeleton')]:
+            config = {'type': hero, 'level': 20, 'attack': 2, 'defense': 3, 'power': 4, 'knowledge': 10, 'skills': [], 'spells': [15]}
+            native = self.request('create', seed=1337, armies=armies, heroes=[config, None])['result']['state']
+            baseline = self.request('create', seed=1337, armies=armies, heroes=[{k: v for k, v in config.items() if k not in ['type', 'level']}, None])['result']['state']
+            self.assertEqual(native['heroes'][0]['skills'], [])
+            self.assertEqual([spell['id'] for spell in native['heroes'][0]['spells']], [15])
+            for before in baseline['units']:
+                after = next(u for u in native['units'] if u['id'] == before['id'])
+                if before['side'] == 0 and before['creature'] == key:
+                    self.assertGreater(after['attack'], before['attack'])
+                    self.assertGreater(after['defense'], before['defense'])
+                    self.assertEqual(after['speed'], before['speed'] + 1)
+                else: self.assertEqual(after, before)
+            self.assertIsNone(baseline['heroes'][0]['type'])
+
+    def test_secondary_skill_specialties_affect_actual_native_damage(self):
+        armies = [[{'creature': 3, 'count': 20, 'hex': 90}], [{'creature': 58, 'count': 1000, 'hex': 96}]]
+        for type_id, action, spell in [(0, 'shoot', None), (74, 'spell', 15)]:
+            levelled = self.request('deployment', seed=1337, armies=armies, heroes=[{'type': type_id, 'level': 20}, None])['result']['state']['heroes'][0]
+            custom = {key: levelled[key] for key in ['attack', 'defense', 'power', 'knowledge', 'skills']}
+            custom['spells'] = [spell] if spell else []
+            damages = []
+            for hero in [{**custom, 'type': type_id, 'level': 20}, custom]:
+                state = self.request('create', seed=1337, armies=armies, heroes=[hero, None])['result']['state']
+                enemy = next(u for u in state['units'] if u['side'] == 1)
+                args = {'spell': spell, 'targets': [{'unit': enemy['id']}]} if spell else {'target': enemy['id']}
+                after = self.act(state, action, **args)['state']
+                damages.append(enemy['health'] - next(u for u in after['units'] if u['id'] == enemy['id'])['health'])
+            self.assertGreater(damages[0], damages[1], (type_id, damages))
+
+    def test_invalid_named_heroes_levels_and_duplicate_type_is_supported(self):
+        armies = [[{'creature': 3, 'count': 20}], [{'creature': 58, 'count': 100}]]
+        response = self.request('create', seed=1337, armies=armies, heroes=[{'type': 71, 'level': 10}, {'type': 71, 'level': 10}])
+        self.assertTrue(response['ok'], response.get('error'))
+        state = response['result']['state']
+        self.assertEqual([hero['type'] for hero in state['heroes']], [71, 71])
+        maximum = self.request('catalogue')['result']['namedHeroes']['maxLevel']
+        for hero in [{'type': 16}, {'type': 80}, {'type': -1}, {'type': 71, 'level': 0}, {'type': 71, 'level': maximum + 1}, {**self.hero([15]), 'level': 20}, {'type': 71, 'skills': {}}, {'type': 71, 'spells': 15}]:
+            self.assertFalse(self.request('create', seed=1337, armies=armies, heroes=[hero, None])['ok'], hero)
+            self.assertEqual(self.request('state')['result']['state'], state)
+
+
 if __name__ == "__main__":
     unittest.main()

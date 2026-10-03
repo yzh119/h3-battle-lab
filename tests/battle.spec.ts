@@ -334,3 +334,40 @@ test('native terrain and obstacle previews match combat and remain visible with 
   await page.locator('#native-obstacles').uncheck(); await expect(page.locator('#start-battle')).toBeEnabled();
   expect((await snapshot(page)).renderedObstacles).toBe(0); expect(errors).toEqual([]);
 });
+
+
+test('named heroes keep native specialties, leveling and editable spellbooks', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  await missingArt(page); const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
+  await open(page); await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#hero-editor summary').click();
+  await expect(page.locator('#hero-type-0 option')).toHaveCount(33);
+  await page.locator('#hero-enabled-0').check(); await page.locator('#hero-type-0').selectOption('71');
+  await page.locator('#hero-level-0').fill('20'); await page.locator('#hero-level-0').press('Tab');
+  await expect(page.locator('#start-battle')).toBeEnabled();
+  await expect(page.locator('#hero-specialty-0')).toContainText('Skeletons');
+  await expect(page.locator('#hero-preview-0')).toContainText('Galthran · 20 级');
+  const preview = (await snapshot(page)).deployment;
+  expect(preview.heroes[0].type).toBe(71); expect(preview.heroes[0].level).toBe(20);
+  await expect(page.locator('#hero-attack-0')).toBeDisabled();
+  await expect(page.locator('#hero-attack-0')).toHaveValue(String(preview.heroes[0].attack));
+  await page.locator('.army-slot[data-team="0"][data-slot="0"]').hover();
+  const skeleton = preview.units.find((u: any) => u.side === 0);
+  await expect(page.locator('#unit-tooltip')).toContainText(`攻击 ${skeleton.attack} · 防御 ${skeleton.defense}`);
+  expect(skeleton.speed).toBe(5);
+  await page.locator('#start-battle').click(); await expect(page.locator('#defend-turn')).toBeEnabled();
+  expect((await snapshot(page)).state.heroes).toEqual(preview.heroes);
+  await expect(page.locator('#hero-type-0')).toBeDisabled();
+  await page.locator('#reset').click(); await expect(page.locator('#start-battle')).toBeEnabled();
+  await expect(page.locator('#hero-type-0')).toHaveValue('71'); await expect(page.locator('#hero-level-0')).toHaveValue('20');
+  // Keep the native hero identity and specialty while authoring a specific spellbook.
+  await page.locator('#hero-override-0').check(); await expect(page.locator('#hero-attack-0')).toBeEnabled();
+  await page.locator('#hero-spells-0').selectOption('15');
+  await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#start-battle').click(); await expect(page.locator('#defend-turn')).toBeEnabled();
+  await page.locator('#spellbook summary').click(); await expect(page.locator('#hero-status')).toContainText('Galthran');
+  await expect(page.locator('#cast-spell')).toBeEnabled();
+  await page.locator('#cast-spell').click(); await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+  await expect(page.locator('#combat-log')).toContainText('Magic Arrow');
+  expect((await snapshot(page)).state.heroes[0].type).toBe(71); expect(errors).toEqual([]);
+});

@@ -2,6 +2,8 @@
 // Local JSON-lines engine service; GUI and transports do not compute combat.
 #include "battle-context.h"
 #include "lib/json/JsonParser.h"
+#include "lib/entities/hero/CHeroHandler.h"
+#include "lib/entities/hero/CHeroClass.h"
 #include "lib/mapObjects/CGTownInstance.h"
 #include "lib/battle/ReachabilityInfo.h"
 #include "server/queries/BattleQueries.h"
@@ -137,11 +139,44 @@ JsonNode scenarioCatalogue()
     return result;
 }
 
+bool allowedHero(int id)
+{
+    return ((id >= 0 && id < 16) || (id >= 64 && id < 80)) && HeroTypeID(id).toHeroType()->getModScope() == "core";
+}
+
+int maxPresetHeroLevel()
+{
+    int maximum = 1;
+    for (unsigned level = 2; level <= LIBRARY->heroh->maxSupportedLevel(); ++level) {
+        if (LIBRARY->heroh->reqExp(level) > UINT32_MAX) break;
+        maximum = level;
+    }
+    return maximum;
+}
+
+JsonNode heroCatalogue()
+{
+    JsonNode result; result["maxLevel"].Integer() = maxPresetHeroLevel();
+    for (int id = 0; id < 80; ++id) {
+        if (!allowedHero(id)) continue;
+        const auto * hero = HeroTypeID(id).toHeroType();
+        JsonNode entry; entry["id"].Integer() = id; entry["key"].String() = hero->getJsonKey();
+        entry["label"].String() = hero->getNameTranslated();
+        entry["class"].String() = hero->heroClass->getNameTranslated();
+        entry["faction"].String() = id < 16 ? "Castle" : "Necropolis";
+        entry["specialty"].String() = hero->getSpecialtyNameTranslated();
+        entry["description"].String() = hero->getSpecialtyDescriptionTranslated();
+        result["heroes"].Vector().push_back(std::move(entry));
+    }
+    return result;
+}
+
 JsonNode catalogue()
 {
     JsonNode result;
     result["backend"].String() = "vcmi-native";
     result["scenarios"] = scenarioCatalogue();
+    result["namedHeroes"] = heroCatalogue();
     result["rulesProfile"].String() = customDefinitions.empty() ? "base-reference" : "custom-reference";
     result["customPacks"].Bool() = true;
     for (const auto * mechanism : {"flying", "additionalAttacks", "regeneration", "retaliations", "blocksRetaliation", "shooter", "undead", "deathCloud"})
@@ -250,28 +285,38 @@ public:
         if (!heroes.isNull()) for (const auto & hero : heroes.Vector())
         {
             if (hero.isNull()) continue;
-            fields(hero, {"attack", "defense", "power", "knowledge", "mana", "skills", "spells"});
-            for (const auto * attribute : {"attack", "defense", "power", "knowledge"}) integer(hero[attribute], 0, 99);
+            fields(hero, {"attack", "defense", "power", "knowledge", "mana", "skills", "spells", "type", "level"});
+            const bool named = !hero["type"].isNull();
+            if (named && !allowedHero(integer(hero["type"], 0, 79))) throw std::runtime_error("Original Castle/Necropolis heroes only");
+            if (!hero["level"].isNull()) { if (!named) throw std::runtime_error("Hero level requires a named hero"); integer(hero["level"], 1, maxPresetHeroLevel()); }
+            for (const auto * attribute : {"attack", "defense", "power", "knowledge"})
+                if (!named || !hero[attribute].isNull()) integer(hero[attribute], 0, 99);
             if (!hero["mana"].isNull()) integer(hero["mana"], 0, 99999);
-            if (!hero["skills"].isVector() || hero["skills"].Vector().size() > 8) throw std::runtime_error("At most eight secondary skills");
+            if ((!named || !hero["skills"].isNull()) && (!hero["skills"].isVector() || hero["skills"].Vector().size() > 8)) throw std::runtime_error("At most eight secondary skills");
             std::set<int> skills;
-            for (const auto & skill : hero["skills"].Vector())
+            for (const auto & skill : hero["skills"].isNull() ? std::vector<JsonNode>{} : hero["skills"].Vector())
             {
                 fields(skill, {"id", "level"}); const int id = integer(skill["id"], 0, 27); integer(skill["level"], 1, 3);
                 if (!skills.insert(id).second) throw std::runtime_error("Duplicate secondary skill");
             }
-            if (!hero["spells"].isVector() || hero["spells"].Vector().size() > 70) throw std::runtime_error("Spell list required");
+            if ((!named || !hero["spells"].isNull()) && (!hero["spells"].isVector() || hero["spells"].Vector().size() > 70)) throw std::runtime_error("Spell list required");
             std::set<int> spells;
-            for (const auto & id : hero["spells"].Vector())
+            for (const auto & id : hero["spells"].isNull() ? std::vector<JsonNode>{} : hero["spells"].Vector())
             {
                 const auto * spell = SpellID(integer(id, 0, 69)).toSpell();
                 if (!spell->isCombat() || spell->isCreatureAbility() || !spells.insert(id.Integer()).second) throw std::runtime_error("Original combat spells only; no duplicates");
             }
         }
         TinyH3M::TinyH3MBuilder builder(EMapFormat::SOD);
-        builder.size(36).name("BattleLab").playerActive(PlayerColor(0)).playerActive(PlayerColor(1))
-            .hero({5, 5, 0}, HeroTypeID(0), PlayerColor(0)).heroGarrison({{CreatureID(0), 1}})
-            .hero({7, 7, 0}, HeroTypeID(1), PlayerColor(1)).heroGarrison({{CreatureID(0), 1}});
+        builder.size(36).name("BattleLab").playerActive(PlayerColor(0)).playerActive(PlayerColor(1));
+        for (int side = 0; side < 2; ++side) {
+            const auto & config = heroes.isNull() ? JsonNode{} : heroes.Vector().at(side);
+            const int type = config["type"].isNull() ? side : config["type"].Integer();
+            const int level = config["level"].isNull() ? 1 : config["level"].Integer();
+            builder.hero(side ? int3{7, 7, 0} : int3{5, 5, 0}, HeroTypeID(type), PlayerColor(side))
+                .heroGarrison({{CreatureID(0), 1}}).heroExperience(LIBRARY->heroh->reqExp(level));
+            server.namedHeroes[side] = !config["type"].isNull();
+        }
         MemoryMap maps(builder.build());
         game = std::make_shared<CGameState>(); game->preInit(LIBRARY);
         StartInfo start; start.mapname = "BattleLab"; start.mode = EStartMode::NEW_GAME;
@@ -295,18 +340,20 @@ public:
             if (auto * hero = dynamic_cast<CGHeroInstance *>(object.get()))
             {
                 const auto side = hero->getOwner() == PlayerColor(0) ? BattleSide::ATTACKER : BattleSide::DEFENDER;
-                neutralize(*hero); hero->clearSlots();
+                if (!server.namedHeroes[static_cast<int>(side)]) neutralize(*hero);
+                hero->clearSlots();
                 if (!heroes.isNull() && !heroes.Vector().at(static_cast<int>(side)).isNull())
                 {
                     const auto & config = heroes.Vector().at(static_cast<int>(side));
-                    hero->setPrimarySkill(PrimarySkill::ATTACK, config["attack"].Integer(), ChangeValueMode::ABSOLUTE);
-                    hero->setPrimarySkill(PrimarySkill::DEFENSE, config["defense"].Integer(), ChangeValueMode::ABSOLUTE);
-                    hero->setPrimarySkill(PrimarySkill::SPELL_POWER, config["power"].Integer(), ChangeValueMode::ABSOLUTE);
-                    hero->setPrimarySkill(PrimarySkill::KNOWLEDGE, config["knowledge"].Integer(), ChangeValueMode::ABSOLUTE);
-                    for (const auto & skill : config["skills"].Vector()) hero->setSecSkillLevel(SecondarySkill(skill["id"].Integer()), skill["level"].Integer(), ChangeValueMode::ABSOLUTE);
-                    hero->removeAllSpells();
-                    for (const auto & spell : config["spells"].Vector()) hero->addSpellToSpellbook(SpellID(spell.Integer()));
-                    if (!hero->getArt(ArtifactPosition::SPELLBOOK)) hero->putArtifact(ArtifactPosition::SPELLBOOK, game->createArtifact(ArtifactID::SPELLBOOK));
+                    if (!config["attack"].isNull()) hero->setPrimarySkill(PrimarySkill::ATTACK, config["attack"].Integer(), ChangeValueMode::ABSOLUTE);
+                    if (!config["defense"].isNull()) hero->setPrimarySkill(PrimarySkill::DEFENSE, config["defense"].Integer(), ChangeValueMode::ABSOLUTE);
+                    if (!config["power"].isNull()) hero->setPrimarySkill(PrimarySkill::SPELL_POWER, config["power"].Integer(), ChangeValueMode::ABSOLUTE);
+                    if (!config["knowledge"].isNull()) hero->setPrimarySkill(PrimarySkill::KNOWLEDGE, config["knowledge"].Integer(), ChangeValueMode::ABSOLUTE);
+                    if (!config["skills"].isNull()) for (int i = 0; i < LIBRARY->skillh->size(); ++i) hero->setSecSkillLevel(SecondarySkill(i), 0, ChangeValueMode::ABSOLUTE);
+                    for (const auto & skill : config["skills"].isNull() ? std::vector<JsonNode>{} : config["skills"].Vector()) hero->setSecSkillLevel(SecondarySkill(skill["id"].Integer()), skill["level"].Integer(), ChangeValueMode::ABSOLUTE);
+                    if (!config["spells"].isNull()) hero->removeAllSpells();
+                    for (const auto & spell : config["spells"].isNull() ? std::vector<JsonNode>{} : config["spells"].Vector()) hero->addSpellToSpellbook(SpellID(spell.Integer()));
+                    if (!config["spells"].isNull() && !hero->getArt(ArtifactPosition::SPELLBOOK)) hero->putArtifact(ArtifactPosition::SPELLBOOK, game->createArtifact(ArtifactID::SPELLBOOK));
                     hero->mana = config["mana"].isNull() ? hero->manaLimit() : config["mana"].Integer();
                     if (hero->mana > hero->manaLimit()) throw std::runtime_error("Mana exceeds native hero limit");
                 }

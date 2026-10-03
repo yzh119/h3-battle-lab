@@ -103,6 +103,16 @@ JsonNode snapshot(const CGameState & state)
         JsonNode heroState;
         if (const auto * hero = battle.battleGetFightingHero(side))
         {
+            heroState["type"].Integer() = hero->getHeroTypeID().getNum();
+            heroState["label"].String() = hero->getHeroType()->getNameTranslated();
+            heroState["level"].Integer() = hero->level;
+            heroState["experience"].Integer() = hero->exp;
+            heroState["skills"].Vector();
+            for (const auto & [id, level] : hero->secSkills) {
+                if (id.getNum() < 0 || id.getNum() >= 28 || !level) continue;
+                JsonNode skill; skill["id"].Integer() = id.getNum(); skill["level"].Integer() = level;
+                heroState["skills"].Vector().push_back(std::move(skill));
+            }
             heroState["side"].Integer() = static_cast<int>(side);
             heroState["mana"].Integer() = hero->mana;
             heroState["maxMana"].Integer() = hero->manaLimit();
@@ -140,9 +150,14 @@ public:
     std::vector<JsonNode> events;
     JsonNode lastState;
     bool initialObstacles = false;
+    std::array<bool, 2> namedHeroes = {false, false};
     JsonNode currentState() const {
         auto result = game->currentBattles.empty() ? lastState : snapshot(*game);
         result["scenario"]["obstacles"].Bool() = initialObstacles;
+        if (result["heroes"].isVector()) for (int side = 0; side < 2; ++side) {
+            auto & hero = result["heroes"].Vector().at(side);
+            if (!hero.isNull() && !namedHeroes[side]) { hero["type"] = JsonNode{}; hero["label"].String() = "Custom hero"; }
+        }
         return result;
     }
     void setState(EServerState value) override { state = value; }
