@@ -694,3 +694,75 @@ test('VCMI AI deploys during tactics before normal automatic battle turns', asyn
   expect((await snapshot(page)).state.tactics).toBeUndefined();
   expect((await snapshot(page)).state.round).toBeGreaterThanOrEqual(1);
 });
+
+
+test('both occupied hexes of a wide enemy accept canvas shooting clicks', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  await missingArt(page); await open(page); await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#creature-picker').selectOption('marksman'); await page.locator('#replace-unit').click();
+  await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('.army-slot[data-team="1"][data-slot="0"]').click();
+  await page.locator('#creature-picker').selectOption('bone-dragon'); await page.locator('#replace-unit').click();
+  await expect(page.locator('#start-battle')).toBeEnabled();
+  for (const index of [0, 1]) {
+    await page.locator('#start-battle').click(); await expect(page.locator('#defend-turn')).toBeEnabled();
+    const current = await snapshot(page);
+    if (current.state.units.find((u: any) => u.id === current.state.activeStack).side === 1) {
+      await page.locator('#defend-turn').click(); await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+    }
+    await page.locator('#overview').click();
+    const before = await snapshot(page), enemy = before.state.units.find((u: any) => u.side === 1);
+    expect(enemy.footprint).toHaveLength(2); expect(before.state.legal.shots).toContain(enemy.id);
+    const screen = await page.evaluate((hex: number) => (window as any).battleLab.hexScreenPosition(hex), enemy.footprint[index]);
+    await page.mouse.move(screen.x, screen.y);
+    expect((await snapshot(page)).pointerAttack).toMatchObject({ kind: 'shoot', target: enemy.id });
+    const packet = page.waitForRequest(request => request.url().endsWith('/api/engine') && request.postDataJSON().request.op === 'act');
+    await page.mouse.click(screen.x, screen.y);
+    expect((await packet).postDataJSON().request).toMatchObject({ action: 'shoot', target: enemy.id });
+    await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+    expect((await snapshot(page)).state.units.find((u: any) => u.id === enemy.id).health).toBeLessThan(enemy.health);
+    await page.locator('#reset').click(); await expect(page.locator('#start-battle')).toBeEnabled();
+  }
+});
+
+test('melee cursor changes with the pointed side and executes that native attack position', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  await missingArt(page); await open(page); await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#creature-picker').selectOption('archangel'); await page.locator('#replace-unit').click();
+  await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('.army-slot[data-team="1"][data-slot="0"]').click();
+  await page.locator('#creature-picker').selectOption('bone-dragon'); await page.locator('#replace-unit').click();
+  await expect(page.locator('#start-battle')).toBeEnabled(); await page.locator('#start-battle').click();
+  await expect(page.locator('#defend-turn')).toBeEnabled(); await page.locator('#overview').click();
+  const before = await snapshot(page), enemy = before.state.units.find((u: any) => u.side === 1);
+  const positions = enemy.footprint;
+  let intents: any[] = [];
+  for (const rotated of [false, true]) {
+    if (rotated) {
+      const canvas = (await snapshot(page)).canvas;
+      await page.mouse.move(canvas.width * .65, canvas.height * .3); await page.mouse.down();
+      await page.mouse.move(canvas.width * .65 + 80, canvas.height * .3 + 20, { steps: 8 }); await page.mouse.up();
+      expect((await snapshot(page)).camera.position).not.toEqual(before.camera.position);
+    }
+    intents = [];
+    for (const hex of positions) {
+      const screen = await page.evaluate((hex: number) => (window as any).battleLab.hexScreenPosition(hex), hex);
+      for (const offset of [-10, 10]) {
+        await page.mouse.move(screen.x, screen.y + offset);
+        const current = await snapshot(page);
+        if (current.pointerAttack?.kind === 'melee') intents.push({ ...current.pointerAttack, x: screen.x, y: screen.y + offset, cursor: await page.locator('#battle').evaluate(el => (el as HTMLElement).style.cursor) });
+      }
+    }
+    expect(new Set(intents.map(intent => intent.from)).size).toBeGreaterThan(1);
+    expect(new Set(intents.map(intent => intent.cursor)).size).toBeGreaterThan(1);
+    for (const intent of intents) expect(before.state.legal.melee).toContainEqual({ target: enemy.id, from: intent.from });
+  }
+  const chosen = intents[intents.length - 1];
+  const packet = page.waitForRequest(request => request.url().endsWith('/api/engine') && request.postDataJSON().request.op === 'act');
+  await page.mouse.click(chosen.x, chosen.y);
+  expect((await packet).postDataJSON().request).toMatchObject({ action: 'melee', target: enemy.id, from: chosen.from });
+  await expect.poll(async () => (await snapshot(page)).busy, { timeout: 20000 }).toBe(false);
+  const after = await snapshot(page);
+  expect(after.state.units.find((u: any) => u.id === before.state.activeStack).hex).toBe(chosen.from);
+  expect(after.state.units.find((u: any) => u.id === enemy.id).health).toBeLessThan(enemy.health);
+});

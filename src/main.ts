@@ -62,6 +62,7 @@ attach(preview('skeleton', 0, 20, 'azure')); attach(preview('zombie', 1, 20, 'em
 const controller = (unit?: NativeUnit) => unit?.controller ?? unit?.side;
 function count(view: UnitView) { return nativeUnits.get(view.unit.id)?.count ?? view.unit.initialCount; }
 function updateSelection(view = selected) {
+  showAttackCursor();
   selected = view;
   $('#unit-picker').replaceChildren(...views.map(v => new Option(`${v.unit.team ? '红方' : '蓝方'} · ${v.unit.label} ×${count(v)}`, v.unit.id)));
   $<HTMLSelectElement>('#unit-picker').value = view.unit.id; $('#unit-name').textContent = view.unit.label;
@@ -307,11 +308,11 @@ async function action(kind: string, options: Record<string, unknown> = {}) {
   } catch (error) { if (generation === token) { if (kind === 'ai') for (const id of ['#ai-blue', '#ai-red']) $<HTMLInputElement>(id).checked = false; message(error instanceof Error ? error.message : String(error)); } }
   finally { if (generation === token) { busy = false; updateSelection(); } }
 }
-async function attack(target: UnitView) {
+async function attack(target: UnitView, from?: number) {
   if (!state?.legal) return;
   const id = nativeUnits.get(target.unit.id)?.id; if (id === undefined) return;
   if (!$<HTMLInputElement>('#force-melee').checked && state.legal.shots.includes(id)) { await action('shoot', { target: id }); return; }
-  const choice = state.legal.melee.find(option => option.target === id);
+  const choice = state.legal.melee.find(option => option.target === id && (from === undefined || option.from === from));
   if (choice) await action('melee', { target: id, from: choice.from }); else message('本回合没有可用的攻击位置。');
 }
 async function move(cell: Hex) {
@@ -498,16 +499,86 @@ function showAttributes(view: UnitView, x: number, y: number) {
   card.style.left = `${Math.max(8, Math.min(x + 16, innerWidth - card.offsetWidth - 8))}px`;
   card.style.top = `${Math.max(8, Math.min(y + 16, innerHeight - card.offsetHeight - 8))}px`;
 }
-canvas.onpointerleave = () => { hideAttributes(); world.hover.visible = false; world.showPath(null); };
-canvas.onpointermove = event => { if (event.buttons) { hideAttributes(); return; } point(event);
-  const unitHit = raycaster.intersectObjects(views.filter(v => v.unit.hp > 0 || v.allowDeadTarget).map(v => v.proxy))[0];
-  const hovered = unitHit && views.find(v => v.unit.id === unitHit.object.userData.unitId);
-  if (hovered) showAttributes(hovered, event.clientX, event.clientY); else hideAttributes();
-  if (busy) return; const hit = raycaster.intersectObjects(world.pickable)[0]; world.hover.visible = !!hit; if (!hit) { world.showPath(null); return; } const cell = hit.object.userData.cell as Hex; world.hover.position.copy(worldPosition(cell)); world.hover.position.y = .035; const id = nativeUnits.get(selected.unit.id)?.id; const moves = state?.tactics ? state.tactics.stacks.find(stack => stack.id === id)?.moves : id === state?.activeStack ? state?.legal?.moves : undefined; const path = moves?.find(move => move.hex === toHexId(cell))?.path; world.showPath(path?.map(fromHexId) ?? null); };
+type PointerAttack = { kind: 'shoot' | 'melee'; target: number; from?: number; angle: number };
+let pointerAttack: PointerAttack | undefined;
+const attackCursors = new Map<string, string>();
+function projectGround(position: THREE.Vector3) {
+  world.camera.updateMatrixWorld();
+  const rect = canvas.getBoundingClientRect(), p = position.clone().project(world.camera);
+  return new THREE.Vector2(rect.left + (p.x + 1) * rect.width / 2, rect.top + (1 - p.y) * rect.height / 2);
+}
+function pickUnit() {
+  const ground = raycaster.intersectObjects(world.pickable)[0];
+  const hex = ground ? toHexId(ground.object.userData.cell) : undefined;
+  const candidates = views.filter(view => view.displayedHp > 0 || view.allowDeadTarget);
+  const body = raycaster.intersectObjects(candidates.map(view => view.proxy))[0];
+  const view = body ? candidates.find(view => view.unit.id === body.object.userData.unitId)
+    : hex === undefined ? undefined : candidates.find(view => view.footprint.includes(hex));
+  return { view, ground };
+}
+function attackAt(view: UnitView, x: number, y: number): PointerAttack | undefined {
+  const target = nativeUnits.get(view.unit.id)?.id;
+  if (busy || !state?.legal || state.tactics || state.winner != null || target === undefined || $('#spellbook').hasAttribute('open')) return;
+  if (!$<HTMLInputElement>('#force-melee').checked && state.legal.shots.includes(target)) return { kind: 'shoot', target, angle: 0 };
+  const options = state.legal.melee.filter(option => option.target === target);
+  const actor = viewFor(state.activeStack ?? -1);
+  if (!options.length || !actor) return;
+  const offset = actor.visualPosition().sub(actor.root.position);
+  const mouse = new THREE.Vector2(x, y);
+  const choice = options.reduce((best, option) => projectGround(worldPosition(fromHexId(option.from)).add(offset)).distanceToSquared(mouse) < projectGround(worldPosition(fromHexId(best.from)).add(offset)).distanceToSquared(mouse) ? option : best);
+  const from = projectGround(worldPosition(fromHexId(choice.from)).add(offset));
+  const toward = projectGround(view.visualPosition()).sub(from);
+  return { kind: 'melee', target, from: choice.from, angle: Math.atan2(toward.y, toward.x) * 180 / Math.PI };
+}
+function showAttackCursor(attack?: PointerAttack) {
+  pointerAttack = attack;
+  if (!attack) { canvas.style.cursor = busy ? 'wait' : ''; return; }
+  const angle = Math.round(attack.angle / 15) * 15, key = `${attack.kind}:${angle}`;
+  let cursor = attackCursors.get(key);
+  if (!cursor) {
+    const drawing = attack.kind === 'shoot'
+      ? '<circle cx="20" cy="20" r="12"/><path d="M20 2v10m0 16v10M2 20h10m16 0h10"/>'
+      : `<g transform="rotate(${angle} 20 20)"><path fill="#f5d786" d="M5 17h18v-7l13 10-13 10v-7H5z"/></g>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40"><g fill="none" stroke="#18231f" stroke-width="3" stroke-linejoin="round">${drawing}</g></svg>`;
+    cursor = `url("data:image/svg+xml,${encodeURIComponent(svg)}") 20 20, crosshair`; attackCursors.set(key, cursor);
+  }
+  canvas.style.cursor = cursor;
+}
+canvas.onpointerleave = () => { hideAttributes(); showAttackCursor(); world.hover.visible = false; world.showPath(null); };
+canvas.onpointermove = event => {
+  if (event.buttons) { hideAttributes(); showAttackCursor(); world.showPath(null); return; }
+  point(event);
+  const { view, ground } = pickUnit();
+  if (view) showAttributes(view, event.clientX, event.clientY); else hideAttributes();
+  const intent = view ? attackAt(view, event.clientX, event.clientY) : undefined;
+  showAttackCursor(intent);
+  if (busy) { world.showPath(null); return; }
+  world.hover.visible = !!ground;
+  if (!ground) { world.showPath(null); return; }
+  const cell = ground.object.userData.cell as Hex;
+  world.hover.position.copy(worldPosition(cell)); world.hover.position.y = .035;
+  const id = nativeUnits.get(selected.unit.id)?.id;
+  const moves = state?.tactics ? state.tactics.stacks.find(stack => stack.id === id)?.moves : id === state?.activeStack ? state?.legal?.moves : undefined;
+  const path = intent?.kind === 'melee' ? state?.legal?.moves.find(move => move.hex === intent.from)?.path : moves?.find(move => move.hex === toHexId(cell))?.path;
+  world.showPath(path?.map(fromHexId) ?? null);
+};
 canvas.onpointerdown = event => { hideAttributes(); pressed.set(event.clientX, event.clientY); };
-canvas.onpointerup = event => { if (event.button !== 0 || busy || pressed.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 5) return; point(event);
-  const unit = raycaster.intersectObjects(views.filter(v => v.unit.hp > 0 || v.allowDeadTarget).map(v => v.proxy))[0]; if (unit) { const view = views.find(v => v.unit.id === unit.object.userData.unitId)!; selectView(view); if (chooseSpellTarget(nativeUnits.get(view.unit.id))) return; const native = nativeUnits.get(view.unit.id); if (native && state?.legal?.heals?.includes(native.id)) { $<HTMLSelectElement>('#heal-target').value = String(native.id); message('已选择治疗目标，点击「急救帐篷治疗」确认。'); return; } if (native && state?.legal && ($<HTMLInputElement>('#force-melee').checked ? state.legal.melee.some(option => option.target === native.id) : state.legal.shots.includes(native.id) || state.legal.melee.some(option => option.target === native.id))) void attack(view); return; }
-  const tile = raycaster.intersectObjects(world.pickable)[0]; if (tile && !chooseSpellTarget(undefined, toHexId(tile.object.userData.cell))) void move(tile.object.userData.cell);
+canvas.onpointerup = event => {
+  if (event.button !== 0 || busy || pressed.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 5) return;
+  point(event);
+  const { view, ground } = pickUnit();
+  if (view) {
+    const intent = attackAt(view, event.clientX, event.clientY);
+    selectView(view);
+    const native = nativeUnits.get(view.unit.id);
+    if (chooseSpellTarget(native)) return;
+    if (native && state?.legal?.heals?.includes(native.id)) {
+      $<HTMLSelectElement>('#heal-target').value = String(native.id); message('已选择治疗目标，点击「急救帐篷治疗」确认。'); return;
+    }
+    if (intent) { showAttackCursor(); void attack(view, intent.from); }
+    return;
+  }
+  if (ground && !chooseSpellTarget(undefined, toHexId(ground.object.userData.cell))) void move(ground.object.userData.cell);
 };
 $('#overview').onclick = () => { world.resetCamera(); $('#overview').classList.add('active'); $('#closeup').classList.remove('active'); }; $('#closeup').onclick = () => { world.frameUnit(selected.visualPosition()); $('#closeup').classList.add('active'); $('#overview').classList.remove('active'); };
 $('#zoom-in').onclick = () => world.zoomBy(1.15); $('#zoom-out').onclick = () => world.zoomBy(1 / 1.15);
@@ -554,5 +625,5 @@ function unitScreenPosition(view: UnitView) {
   const rect = canvas.getBoundingClientRect(), point = view.visualPosition().add(new THREE.Vector3(0, view.height / 2, 0)).project(world.camera);
   return { x: rect.left + (point.x + 1) * rect.width / 2, y: rect.top + (1 - point.y) * rect.height / 2 };
 }
-Object.assign(window, { battleLab: { snapshot: () => ({ connected, busy, deploying, projectiles, state, deployment, previewMachines: previewMachines.map(view => ({ ...view.unit })), renderedObstacles: world.obstacleCount(), terrain: world.terrain(), environment: world.environment(), backdrop: world.isBackdrop(), canvas: canvas.getBoundingClientRect().toJSON(), grid: world.grid.visible, selected: selected.unit.id, movementRange: world.movementRange(), camera: { position: world.camera.position.toArray(), target: world.controls.target.toArray(), enabled: world.controls.enabled }, draws: world.renderer.info.render.calls, units: views.map(v => ({ ...v.unit, screen: unitScreenPosition(v), count: count(v), native: nativeUnits.get(v.unit.id), imported: v.imported, sourceRevision: v.sourceRevision, animation: v.current, clips: v.clips.map(c => c.name), position: v.root.position.toArray(), visualPosition: v.visualPosition().toArray(), footprint: v.footprint, displayHeight: v.height, heading: v.root.rotation.y, modelYaw: v.model.rotation.y, countLabel: { depthTest: v.countLabel.material.depthTest, position: v.countLabel.getWorldPosition(new THREE.Vector3()).toArray(), visible: v.countLabel.visible }, pose: v.poseSignature() })) }), move, attack: (targetId?: number) => { const target = targetId !== undefined ? viewFor(targetId) : views.find(v => controller(nativeUnits.get(v.unit.id)) !== controller(nativeUnits.get(viewFor(state?.activeStack ?? -1)?.unit.id ?? ''))); return target ? attack(target) : Promise.resolve(); } } });
+Object.assign(window, { battleLab: { snapshot: () => ({ connected, busy, deploying, projectiles, pointerAttack, state, deployment, previewMachines: previewMachines.map(view => ({ ...view.unit })), renderedObstacles: world.obstacleCount(), terrain: world.terrain(), environment: world.environment(), backdrop: world.isBackdrop(), canvas: canvas.getBoundingClientRect().toJSON(), grid: world.grid.visible, selected: selected.unit.id, movementRange: world.movementRange(), camera: { position: world.camera.position.toArray(), target: world.controls.target.toArray(), enabled: world.controls.enabled }, draws: world.renderer.info.render.calls, units: views.map(v => ({ ...v.unit, screen: unitScreenPosition(v), count: count(v), native: nativeUnits.get(v.unit.id), imported: v.imported, sourceRevision: v.sourceRevision, animation: v.current, clips: v.clips.map(c => c.name), position: v.root.position.toArray(), visualPosition: v.visualPosition().toArray(), footprint: v.footprint, displayHeight: v.height, heading: v.root.rotation.y, modelYaw: v.model.rotation.y, countLabel: { depthTest: v.countLabel.material.depthTest, position: v.countLabel.getWorldPosition(new THREE.Vector3()).toArray(), visible: v.countLabel.visible }, pose: v.poseSignature() })) }), hexScreenPosition: (hex: number) => projectGround(worldPosition(fromHexId(hex))), move, attack: (targetId?: number) => { const target = targetId !== undefined ? viewFor(targetId) : views.find(v => controller(nativeUnits.get(v.unit.id)) !== controller(nativeUnits.get(viewFor(state?.activeStack ?? -1)?.unit.id ?? ''))); return target ? attack(target) : Promise.resolve(); } } });
 void boot();
