@@ -1,0 +1,3 @@
+[submodule "3rdparty/vcmi"]
+	path = 3rdparty/vcmi
+	url = https://github.com/vcmi/vcmi.git
