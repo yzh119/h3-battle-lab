@@ -1,9 +1,16 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { clone } from 'three/addons/utils/SkeletonUtils.js';
+import { Sky } from 'three/addons/objects/Sky.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { cells, isPlayable, key, fromHexId, type Hex } from './presentation.ts';
 
 export const RADIUS = 1.18;
+export interface EnvironmentAsset {
+  label: string; ground: string; normal?: string; roughness?: string; groundRepeat?: number;
+  pieces: { url: string; height: number; instances: { position: [number, number, number]; yaw?: number; scale?: number }[] }[];
+}
 export function worldPosition(h: Hex): THREE.Vector3 {
   return new THREE.Vector3(Math.sqrt(3) * RADIUS * (h.q + h.r / 2 - 7.75), 0, 1.5 * RADIUS * (h.r - 5));
 }
@@ -21,6 +28,31 @@ export function createWorld(canvas: HTMLCanvasElement) {
   controls.minDistance = 3.5; controls.maxDistance = 65; controls.maxPolarAngle = Math.PI / 2 - .045;
   controls.target.set(0, .8, 0); camera.position.set(12, 26, 40);
   controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE; controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
+  const movementKeys = new Set<string>();
+  const editing = () => document.activeElement instanceof HTMLElement && !!document.activeElement.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]');
+  window.addEventListener('keydown', event => {
+    if (!['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(event.code) || editing() || event.ctrlKey || event.metaKey || event.altKey) return;
+    event.preventDefault(); movementKeys.add(event.code);
+  });
+  window.addEventListener('keyup', event => movementKeys.delete(event.code));
+  window.addEventListener('blur', () => movementKeys.clear());
+  document.addEventListener('visibilitychange', () => movementKeys.clear());
+  document.addEventListener('focusin', () => { if (editing()) movementKeys.clear(); });
+  const forward = new THREE.Vector3(), right = new THREE.Vector3(), movement = new THREE.Vector3();
+  function updateCamera(dt: number) {
+    if (controls.enabled && movementKeys.size && !editing()) {
+      camera.getWorldDirection(forward); forward.y = 0; forward.normalize();
+      right.crossVectors(forward, camera.up).normalize();
+      const longitudinal = Number(movementKeys.has('KeyW')) - Number(movementKeys.has('KeyS'));
+      const lateral = Number(movementKeys.has('KeyD')) - Number(movementKeys.has('KeyA'));
+      movement.copy(forward).multiplyScalar(longitudinal).addScaledVector(right, lateral);
+      if (movement.lengthSq()) {
+        movement.normalize().multiplyScalar(10 * dt);
+        camera.position.add(movement); controls.target.add(movement);
+      }
+    }
+    if (controls.enabled) controls.update();
+  }
   const ambient = new THREE.HemisphereLight('#d6e5ee', '#66513a', 1.25); scene.add(ambient);
   const sun = new THREE.DirectionalLight('#ffe0a4', 3.2); sun.position.set(-16, 28, 13); sun.castShadow = true;
   Object.assign(sun.shadow.camera, { left: -25, right: 25, top: 25, bottom: -25, near: 1, far: 90 });
@@ -104,12 +136,68 @@ export function createWorld(canvas: HTMLCanvasElement) {
       const color = low.clone().lerp(high, t); values.setXYZ(i, color.r, color.g, color.b);
     }
     values.needsUpdate = true;
+    if (environmentId) return;
     trunks.visible = crowns.visible = [0, 2, 3, 4].includes(id);
     tufts.visible = [0, 2, 4, 5].includes(id);
     leaf.color.set(id === 3 ? '#9baea5' : '#384c3b');
+
   }
   const shadowFloor = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), new THREE.ShadowMaterial({ opacity: .32 }));
   shadowFloor.rotation.x = -Math.PI / 2; shadowFloor.position.y = -.025; shadowFloor.receiveShadow = true; shadowFloor.visible = false; scene.add(shadowFloor);
+  const backdropBoard = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+  backdropBoard.rotation.x = -Math.PI / 2; backdropBoard.position.y = -.04; backdropBoard.visible = false; scene.add(backdropBoard);
+  const importedEnvironment = new THREE.Group(); scene.add(importedEnvironment);
+  const sky = new Sky(); sky.scale.setScalar(150); sky.visible = false; scene.add(sky);
+  sky.material.uniforms.turbidity.value = 3; sky.material.uniforms.rayleigh.value = 1.7;
+  sky.material.uniforms.mieCoefficient.value = .005; sky.material.uniforms.mieDirectionalG.value = .8;
+  sky.material.uniforms.sunPosition.value.copy(sun.position).normalize();
+  const originalGround = new Float32Array(positions.array);
+  let environmentId: string | undefined, environmentRequest = 0;
+  async function setEnvironment(id: string, asset: EnvironmentAsset) {
+    const request = ++environmentRequest;
+    const [texture, normal, roughness, models] = await Promise.all([
+      new THREE.TextureLoader().loadAsync(asset.ground),
+      asset.normal ? new THREE.TextureLoader().loadAsync(asset.normal) : undefined,
+      asset.roughness ? new THREE.TextureLoader().loadAsync(asset.roughness) : undefined,
+      Promise.all(asset.pieces.map(piece => new GLTFLoader().loadAsync(piece.url))),
+    ]);
+    if (request !== environmentRequest) return;
+    const candidate = new THREE.Group();
+    asset.pieces.forEach((piece, i) => {
+      const source = models[i].scene, bounds = new THREE.Box3().setFromObject(source), height = bounds.max.y - bounds.min.y;
+      if (!Number.isFinite(height) || height <= 0) throw new Error('场景模型尺寸无效');
+      const center = bounds.getCenter(new THREE.Vector3());
+      for (const placement of piece.instances) {
+        const model = clone(source), pivot = new THREE.Group();
+        model.position.add(new THREE.Vector3(-center.x, -bounds.min.y, -center.z)); pivot.add(model);
+        pivot.scale.setScalar(piece.height / height * (placement.scale ?? 1)); pivot.rotation.y = placement.yaw ?? 0;
+        pivot.position.fromArray(placement.position); model.traverse(object => { if (object instanceof THREE.Mesh) { object.castShadow = true; object.receiveShadow = true; } });
+        candidate.add(pivot);
+      }
+    });
+    freeCamera(); importedEnvironment.clear(); importedEnvironment.add(candidate); environmentId = id;
+    for (const object of scenery.children) object.visible = object === ground;
+    texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    for (const map of [texture, normal, roughness]) if (map) { map.wrapS = map.wrapT = THREE.RepeatWrapping; map.repeat.setScalar(asset.groundRepeat ?? 40); map.anisotropy = renderer.capabilities.getMaxAnisotropy(); }
+    ground.material.normalMap = normal ?? null; ground.material.roughnessMap = roughness ?? null; ground.material.normalScale.set(1, 1);
+    ground.material.map = texture; ground.material.vertexColors = false; ground.material.color.set('#ffffff'); ground.material.needsUpdate = true;
+    for (let i = 0; i < positions.count; i++) {
+      const x = positions.getX(i), z = positions.getZ(i);
+      const edge = THREE.MathUtils.smoothstep(Math.max(Math.abs(x) - 21, Math.abs(z) - 13), 0, 9);
+      const hill = 4 + 2.3 * Math.sin(x * .065 + z * .024) + 1.5 * Math.cos(z * .097 - x * .027);
+      const detail = .35 * Math.sin(x * .41) * Math.cos(z * .32) + .12 * Math.sin(x * 1.15 + z * .89);
+      positions.setY(i, -.04 + edge * (hill + detail));
+    }
+    positions.needsUpdate = true; groundGeometry.computeVertexNormals(); sky.visible = true;
+    scene.fog = new THREE.Fog('#b4c9cb', 60, 150); resetCamera();
+  }
+  function clearEnvironment() {
+    environmentRequest++; environmentId = undefined; importedEnvironment.clear(); sky.visible = false;
+    positions.array.set(originalGround); positions.needsUpdate = true; groundGeometry.computeVertexNormals();
+    ground.material.map = ground.material.normalMap = ground.material.roughnessMap = null; ground.material.vertexColors = true; ground.material.needsUpdate = true;
+    for (const object of scenery.children) object.visible = true;
+    const id = terrainId; terrainId = undefined; if (id !== undefined) setTerrain(id);
+  }
   let backdrop: THREE.Texture | undefined, plateMode = false, selectedBackdrop = false, plateRequest = 0;
   const backgrounds = new Map<string, THREE.Texture>();
   function resize() {
@@ -124,47 +212,37 @@ export function createWorld(canvas: HTMLCanvasElement) {
   }
   const observer = new ResizeObserver(resize); observer.observe(canvas); window.addEventListener('resize', resize); resize();
   function zoomBy(factor: number) {
-    if (plateMode && backdrop) {
-      camera.zoom = THREE.MathUtils.clamp(camera.zoom * factor, 1, 3);
-      backdrop.repeat.setScalar(1 / camera.zoom);
-      backdrop.offset.setScalar((1 - 1 / camera.zoom) / 2);
-      camera.updateProjectionMatrix();
-    } else {
-      const offset = camera.position.clone().sub(controls.target);
-      offset.setLength(THREE.MathUtils.clamp(offset.length() / factor, controls.minDistance, controls.maxDistance));
-      camera.position.copy(controls.target).add(offset); controls.update();
-    }
+    const offset = camera.position.clone().sub(controls.target);
+    offset.setLength(THREE.MathUtils.clamp(offset.length() / factor, controls.minDistance, controls.maxDistance));
+    camera.position.copy(controls.target).add(offset); controls.update();
   }
-  canvas.addEventListener('wheel', event => {
-    if (!plateMode) return;
-    event.preventDefault();
-    const pixels = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? canvas.clientHeight : 1);
-    zoomBy(Math.exp(-THREE.MathUtils.clamp(pixels, -300, 300) * .002));
-  }, { passive: false });
   function applyMode(enabled: boolean) {
     camera.zoom = 1; camera.updateProjectionMatrix();
-    plateMode = enabled; scenery.visible = !enabled; shadowFloor.visible = enabled; controls.enabled = !enabled;
-    scene.fog = enabled ? null : new THREE.Fog('#9aa79f', 38, 115);
-    scene.background = enabled && backdrop ? backdrop : new THREE.Color('#9aa79f'); resize();
+    plateMode = enabled; importedEnvironment.visible = !enabled; sky.visible = !enabled && !!environmentId; scenery.visible = !enabled; shadowFloor.visible = enabled; controls.enabled = true;
+    scene.fog = enabled ? null : environmentId ? new THREE.Fog('#b4c9cb', 60, 150) : new THREE.Fog('#9aa79f', 38, 115);
+    backdropBoard.visible = enabled; scene.background = new THREE.Color('#9aa79f'); resize();
   }
   async function setBackdrop(url: string) {
     const request = ++plateRequest;
     let texture = backgrounds.get(url);
     if (!texture) { texture = await new THREE.TextureLoader().loadAsync(url); texture.colorSpace = THREE.SRGBColorSpace; backgrounds.set(url, texture); }
     if (request !== plateRequest) return;
-    backdrop = texture; selectedBackdrop = true; applyMode(true); resetCamera();
+    backdrop = texture; backdropBoard.material.map = texture; backdropBoard.material.needsUpdate = true;
+    const image = texture.image as HTMLImageElement; backdropBoard.scale.set(40, 40 * image.height / image.width, 1);
+    selectedBackdrop = true; applyMode(true); resetCamera();
   }
   function freeCamera() { plateRequest++; selectedBackdrop = false; applyMode(false); }
   function frameUnit(position: THREE.Vector3) { plateRequest++; applyMode(false); controls.target.copy(position).add(new THREE.Vector3(0, 1.1, 0)); camera.position.copy(position).add(new THREE.Vector3(4.4, 3.5, 5.8)); controls.update(); }
   function resetCamera() {
     applyMode(selectedBackdrop);
     camera.zoom = 1; if (backdrop) { backdrop.repeat.setScalar(1); backdrop.offset.setScalar(0); } camera.updateProjectionMatrix();
-    if (plateMode) { camera.position.set(0, 26, 32); controls.target.set(0, 0, 0); camera.lookAt(controls.target); }
+    if (plateMode) { camera.position.set(12, 26, 40); controls.target.set(0, .8, 0); controls.update(); }
     else { camera.position.set(12, 26, 40); controls.target.set(0, .8, 0); controls.update(); }
   }
+
   function setMood(dusk: boolean) {
     const bg = dusk ? '#66788a' : '#9aa79f'; if (!plateMode) scene.background = new THREE.Color(bg); scene.fog?.color.set(bg);
     sun.color.set(dusk ? '#bacfea' : '#ffe0a4'); sun.intensity = dusk ? 1.8 : 3.2; ambient.intensity = dusk ? .8 : 1.25;
   }
-  return { renderer, scene, camera, controls, grid, pickable, hover, showPath, setObstacles, setTerrain, terrain: () => terrainId, obstacleCount: () => obstacleGroup.children.length, frameUnit, resetCamera, setMood, sun, zoomBy, setBackdrop, freeCamera, isBackdrop: () => plateMode };
+  return { renderer, scene, camera, controls, updateCamera, grid, pickable, hover, showPath, setObstacles, setTerrain, terrain: () => terrainId, obstacleCount: () => obstacleGroup.children.length, frameUnit, resetCamera, setMood, sun, zoomBy, setBackdrop, freeCamera, isBackdrop: () => plateMode, environment: () => environmentId, setEnvironment, clearEnvironment };
 }

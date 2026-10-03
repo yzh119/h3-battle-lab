@@ -12,23 +12,25 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <canvas id="battle" aria-label="可旋转的三维六角格战场"></canvas>
   <div id="unit-tooltip" role="tooltip" hidden></div><div id="stack-labels" aria-label="场上兵力"></div><header><a class="brand" href="https://github.com/yzh119/h3-battle-lab" target="_blank" rel="noreferrer">H3 <span>BATTLE LAB</span></a><div class="top-label">战场实验室 <span>01 / 林地</span></div><div class="live"><i></i> 实时 3D</div></header>
   <aside class="panel"><div class="eyebrow">战场视角</div><h1>走进战场。</h1><p class="intro">换一个角度，看清每一次交锋。</p><select id="unit-picker" aria-label="选择场上单位"><option value="azure">骷髅兵</option><option value="ember">僵尸</option></select>
-  <button id="connect-engine">连接引擎</button><p id="engine-status" role="status">正在连接本地引擎…</p><button id="ten-week-armies" disabled>十周城镇产出</button><label class="switch"><span>使用升级兵种</span><input id="preset-upgraded" type="checkbox" checked></label><p class="preset-note">蓝方城堡 · 红方墓园<br>完整城镇，不含圣杯及额外奖励</p><button id="start-battle" disabled>开始对战</button><p id="turn-status" role="status">配置阵容后开始对战</p><div class="button-row"><button id="wait-turn" disabled>等待</button><button id="defend-turn" disabled>防御</button></div><label class="switch"><span>蓝方 VCMI AI</span><input id="ai-blue" type="checkbox"></label><label class="switch"><span>红方 VCMI AI</span><input id="ai-red" type="checkbox"></label><button id="ai-step" disabled>VCMI AI 行动一次</button><p id="turn-queue"></p><label class="switch"><span>射手强制近战</span><input id="force-melee" type="checkbox"></label>
-  <details id="army-editor" open><summary>配置双方阵容</summary><p id="selected-slot-label"></p><label for="creature-picker">兵种</label><select id="creature-picker" aria-label="选择上场兵种"></select><label for="team-picker">阵营</label><select id="team-picker" aria-label="选择上场阵营"><option value="0">蓝方</option><option value="1">红方</option></select><label for="stack-count">每队数量</label><input id="stack-count" aria-label="每队数量" type="number" min="1" max="99999" step="1" value="20"><button id="assign-slot">配置选中格子</button><button id="apply-count" class="quiet">应用数量到选中队伍</button><p id="creature-note"></p><div class="button-row"><button id="add-unit">添加上场</button><button id="replace-unit">替换选中</button></div><button id="remove-unit" class="quiet">移除选中单位</button><p>每方最多 7 队 · 双方均可操控<br>点击队伍格配置兵种与数量；空格也可直接选择</p></details><details id="scenario-editor" open><summary>战斗场景</summary><p>地形影响战斗属性；显示背景单独选择。障碍物目前以石块标出原生占位。</p><label>地形<select id="terrain-picker" aria-label="选择战斗地形" disabled></select></label><label>战场<select id="battlefield-picker" aria-label="选择战场类型" disabled></select></label><label class="switch"><input id="native-obstacles" type="checkbox" disabled>VCMI 障碍物</label><label>障碍布局<input id="obstacle-layout" aria-label="障碍布局编号" type="number" min="0" step="1" value="148" disabled></label><button id="next-layout" disabled>换一个布局</button><p id="scenario-status">连接原生引擎后可配置</p></details><details id="hero-editor"><summary>英雄与魔法</summary><p>城堡／墓园英雄及原生特长<br>升级由引擎分配，也可自定义属性、技能与魔法；战斗宝物待接入</p><div id="hero-configs"></div></details><details id="spellbook"><summary>战斗魔法与兵种能力</summary><select id="spell-caster" aria-label="选择施法者" disabled><option value="hero">英雄魔法</option><option value="creature">兵种能力</option></select><p id="hero-status">英雄参战后可施法</p><select id="spell-picker" aria-label="选择战斗魔法" disabled></select><select id="spell-target" aria-label="选择施法目标" disabled></select><button id="cast-spell" disabled>施放魔法</button><p id="spell-status" role="status"></p></details><details><summary>自定义兵种</summary><p>导入版本 1 的兵种 JSON；VCMI 通过独立 mod 加载机制。自定义模式与原版模式分别标记。</p><input id="creature-import" aria-label="导入自定义兵种 JSON" type="file" accept=".json,application/json"><p id="creature-import-status" role="status"></p></details><div class="section-label">镜头</div><div class="button-row"><button id="overview" class="active">全局</button><button id="closeup">兵种特写</button></div>
-  <div class="button-row zoom-controls"><button id="zoom-out" aria-label="缩小战场">− 缩小</button><button id="zoom-in" aria-label="放大战场">＋ 放大</button></div><div class="section-label">场景</div><select id="background-picker" aria-label="战场背景"><option value="">自由 3D 场景</option></select><p id="scene-hint" class="intro">拖动旋转镜头</p><div class="section-label">环境</div><div class="button-row"><button id="day" class="active">暖阳</button><button id="dusk">阴天</button></div>
+  <button id="connect-engine">连接引擎</button><p id="engine-status" role="status">正在连接本地引擎…</p><button id="ten-week-armies" disabled>十周城镇产出</button><label class="switch"><span>使用升级兵种</span><input id="preset-upgraded" type="checkbox" checked></label><p class="preset-note">蓝方城堡 · 红方墓园<br>完整城镇，不含圣杯及额外奖励</p><button id="start-battle" disabled>开始对战</button><p id="turn-status" role="status">配置阵容后开始对战</p><div class="button-row"><button id="wait-turn" disabled>等待</button><button id="defend-turn" disabled>防御</button></div><div id="healing-controls" hidden><select id="heal-target" aria-label="选择治疗目标" disabled></select><button id="heal-unit" disabled>急救帐篷治疗</button></div><label class="switch"><span>蓝方 VCMI AI</span><input id="ai-blue" type="checkbox"></label><label class="switch"><span>红方 VCMI AI</span><input id="ai-red" type="checkbox"></label><button id="ai-step" disabled>VCMI AI 行动一次</button><p id="turn-queue"></p><label class="switch"><span>射手强制近战</span><input id="force-melee" type="checkbox"></label>
+  <details id="army-editor" open><summary>配置双方阵容</summary><p id="selected-slot-label"></p><label for="creature-picker">兵种</label><select id="creature-picker" aria-label="选择上场兵种"></select><label for="team-picker">阵营</label><select id="team-picker" aria-label="选择上场阵营"><option value="0">蓝方</option><option value="1">红方</option></select><label for="stack-count">每队数量</label><input id="stack-count" aria-label="每队数量" type="number" min="1" max="99999" step="1" value="20"><button id="assign-slot">配置选中格子</button><button id="apply-count" class="quiet">应用数量到选中队伍</button><p id="creature-note"></p><div class="button-row"><button id="add-unit">添加上场</button><button id="replace-unit">替换选中</button></div><button id="remove-unit" class="quiet">移除选中单位</button><p>每方最多 7 队 · 双方均可操控<br>点击队伍格配置兵种与数量；空格也可直接选择</p></details><details id="scenario-editor" open><summary>战斗场景</summary><p>地形影响战斗属性；显示背景单独选择。障碍物目前以石块标出原生占位。</p><label>地形<select id="terrain-picker" aria-label="选择战斗地形" disabled></select></label><label>战场<select id="battlefield-picker" aria-label="选择战场类型" disabled></select></label><label class="switch"><input id="native-obstacles" type="checkbox" disabled>VCMI 障碍物</label><label>障碍布局<input id="obstacle-layout" aria-label="障碍布局编号" type="number" min="0" step="1" value="148" disabled></label><button id="next-layout" disabled>换一个布局</button><p id="scenario-status">连接原生引擎后可配置</p></details><details id="hero-editor"><summary>英雄与魔法</summary><p>城堡／墓园英雄及原生特长<br>升级由引擎分配，也可自定义属性、技能与魔法；装备加成与战争机器由引擎处理</p><div id="hero-configs"></div></details><details id="spellbook"><summary>战斗魔法与兵种能力</summary><select id="spell-caster" aria-label="选择施法者" disabled><option value="hero">英雄魔法</option><option value="creature">兵种能力</option></select><p id="hero-status">英雄参战后可施法</p><select id="spell-picker" aria-label="选择战斗魔法" disabled></select><select id="spell-target" aria-label="选择施法目标" disabled></select><button id="cast-spell" disabled>施放魔法</button><p id="spell-status" role="status"></p></details><details><summary>自定义兵种</summary><p>导入版本 1 的兵种 JSON；VCMI 通过独立 mod 加载机制。自定义模式与原版模式分别标记。</p><input id="creature-import" aria-label="导入自定义兵种 JSON" type="file" accept=".json,application/json"><p id="creature-import-status" role="status"></p></details><div class="section-label">镜头</div><div class="button-row"><button id="overview" class="active">全局</button><button id="closeup">兵种特写</button></div>
+  <div class="button-row zoom-controls"><button id="zoom-out" aria-label="缩小战场">− 缩小</button><button id="zoom-in" aria-label="放大战场">＋ 放大</button></div><div class="section-label">场景</div><select id="background-picker" aria-label="战场背景"><option value="">自由 3D 场景</option></select><p id="scene-hint" class="intro">WASD 移动视角 · 左键旋转 · 右键平移 · 滚轮缩放</p><div class="section-label">环境</div><div class="button-row"><button id="day" class="active">暖阳</button><button id="dusk">阴天</button></div>
   <label class="switch"><span>显示六角格</span><input id="grid" type="checkbox" checked></label>
   <label class="switch"><span>实时阴影</span><input id="shadows" type="checkbox" checked></label>
   <label class="range"><span>画面精细度 <b id="quality-label">高</b></span><input id="quality" aria-label="画面精细度" type="range" min="1" max="2" step=".5" value="2"></label>
-  <div class="divider"></div><p class="rules-note">目标：原版 H3 基础战斗 · 一致性待验证<br>兵种行动与结果由 VCMI 计算；英雄特长、宝物和完整规则验证仍在开发。</p><div id="combat-log" role="log" aria-label="战斗记录"></div><div class="section-label">动作预览</div><div class="actions"><button data-action="idle">待机</button><button data-action="walk">行走</button><button data-action="attack">攻击</button><button data-action="hit">受击</button></div>
+  <div class="divider"></div><p class="rules-note">目标：原版 H3 基础战斗 · 一致性待验证<br>兵种行动与结果由 VCMI 计算；完整规则一致性与围城仍在验证、开发。</p><div id="combat-log" role="log" aria-label="战斗记录"></div><div class="section-label">动作预览</div><div class="actions"><button data-action="idle">待机</button><button data-action="walk">行走</button><button data-action="attack">攻击</button><button data-action="hit">受击</button></div>
   <button id="reset" class="quiet">重置战场 ↺</button><details><summary>载入本地模型</summary><p>选择内嵌贴图的 GLB，替换当前选中的单位。</p><input id="import" aria-label="载入本地 GLB 模型" type="file" accept=".glb"></details>
   </aside><div id="army-slots" aria-label="双方七格阵容"></div>
   <div class="loading" id="loading"><span class="spinner"></span>正在准备战场</div>
   <div id="toast" role="status" aria-live="polite"></div>
-  <footer><div class="selected"><span class="team-dot"></span><div><small>当前兵种</small><strong id="unit-name">骷髅兵</strong></div><span id="hp">100 / 100</span></div><div class="controls-hint">点击兵种选择 · 点击地面移动 · 点击敌军接近并攻击<br><span>拖动旋转 · 滚轮缩放 · 右键平移</span></div><div class="prototype">战场原型 <span id="asset-status">基础场景</span><small id="fps">—</small></div></footer>`;
+  <footer><div class="selected"><span class="team-dot"></span><div><small>当前兵种</small><strong id="unit-name">骷髅兵</strong></div><span id="hp">100 / 100</span></div><div class="controls-hint">点击兵种选择 · 点击地面移动 · 点击敌军接近并攻击<br><span>WASD 移动视角 · 拖动旋转 · 滚轮缩放 · 右键平移</span></div><div class="prototype">战场原型 <span id="asset-status">基础场景</span><small id="fps">—</small></div></footer>`;
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const canvas = $<HTMLCanvasElement>('#battle'), world = createWorld(canvas), clock = new THREE.Timer();
 const engine = new EngineClient();
 let connected = false, busy = false, state: EngineState | undefined, manifest: Manifest | undefined, generation = 0, nextId = 1, projectiles = 0;
+let previewMachines: UnitView[] = [];
+function clearPreviewMachines() { previewMachines.forEach(view => view.dispose()); previewMachines = []; }
 let views: UnitView[] = [], selected: UnitView, lastEditorSelection: UnitView | undefined;
 let editorTeam = 0, editorSlot = 0;
 let scenarios: ScenarioCatalogue | undefined, deployment: EngineState | undefined;
@@ -37,7 +39,7 @@ let spellTargets: SpellTarget[] = [], spellRequest = 0, spellKey = '';
 let creatureSpellsAvailable = false;
 let heroesAvailable = false, aiAvailable = false, aiTimer: ReturnType<typeof setTimeout> | undefined;
 let deploying = false, deploymentRequest = 0;
-const configured = () => views.map(v => ({ ...v.unit, cell: { ...v.unit.cell } }));
+const configured = () => views.filter(v => v.unit.armySlot >= 0).map(v => ({ ...v.unit, cell: { ...v.unit.cell } }));
 let startingArmy: VisualUnit[] = [];
 const nativeCreatures = new Map<string, NativeCreature>();
 const nativeUnits = new Map<string, NativeUnit>();
@@ -82,12 +84,17 @@ function updateSelection(view = selected) {
   for (const id of ['#apply-count', '#replace-unit', '#remove-unit']) $<HTMLButtonElement>(id).disabled = busy || !!state || !occupiedSlot;
   $<HTMLButtonElement>('#ai-step').disabled = busy || !aiAvailable || !state || state.winner != null;
   setHeroEditorDisabled(busy || !!state || !heroesAvailable, deploying);
+  const heals = state?.legal?.heals ?? [];
+  $<HTMLSelectElement>('#heal-target').replaceChildren(...heals.map(id => { const target = state!.units.find(unit => unit.id === id)!; return new Option(`${target.label} ×${target.count} · ${target.topHealth}/${target.maxHealth} HP`, String(id)); }));
+  $('#healing-controls').hidden = !heals.length;
+  $<HTMLButtonElement>('#heal-unit').disabled = busy || !heals.length;
+  $<HTMLSelectElement>('#heal-target').disabled = busy || !heals.length;
   refreshSpellbook();
   renderArmySlots();
   scheduleAI();
   const active = views.find(v => nativeUnits.get(v.unit.id)?.id === state?.activeStack);
   $('#turn-status').textContent = state ? state.winner != null ? `${state.winner === 0 ? '蓝方' : state.winner === 1 ? '红方' : '双方'}${state.winner > 1 ? '平局' : '胜利'} · 第 ${state.round} 回合` : `第 ${state.round} 回合 · ${controller(nativeUnits.get(active?.unit.id ?? '')) ? '红方' : '蓝方'} ${active?.unit.label ?? ''}行动` : '配置阵容后开始对战';
-  $('#turn-queue').textContent = (state?.queue ?? []).map(id => [...nativeUnits.values()].find(u => u.id === id)).map(u => u ? allArt().find(c => c.key === u.creature)?.label : '').join(' → ');
+  $('#turn-queue').textContent = (state?.queue ?? []).map(id => [...nativeUnits.values()].find(u => u.id === id)).map(u => u ? allArt().find(c => c.key === u.creature)?.label ?? u.label : '').join(' → ');
 }
 function renderArmySlots() {
   const root = $('#army-slots'); root.replaceChildren();
@@ -137,7 +144,7 @@ function applyState(next: EngineState, selectActor = false) {
     const prior = nativeUnits.get(view.unit.id);
     if (unit.count > 0 && prior?.count === 0) view.play('idle');
     nativeUnits.set(view.unit.id, unit); view.unit.hp = unit.health; view.unit.cell = fromHexId(unit.hex);
-    view.root.position.copy(worldPosition(view.unit.cell)); view.playbackHp = undefined;
+    view.root.position.copy(worldPosition(view.unit.cell)); view.setFootprint(unit.footprint); view.playbackHp = undefined;
   }
   world.setObstacles(next.obstacles);
   if (next.scenario) world.setTerrain(next.scenario.terrain);
@@ -145,12 +152,15 @@ function applyState(next: EngineState, selectActor = false) {
   updateSelection();
 }
 const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
-function face(view: UnitView, position: THREE.Vector3) { view.root.lookAt(position.x, view.root.position.y, position.z); }
+function face(view: UnitView, position: THREE.Vector3) {
+  const dx = position.x - view.root.position.x, dz = position.z - view.root.position.z;
+  if (dx * dx + dz * dz > 1e-8) view.root.rotation.y = Math.atan2(dx, dz);
+}
 async function follow(view: UnitView, path: number[], token: number) {
   view.play('walk');
   for (const hex of path) {
     if (generation !== token) return;
-    const from = view.root.position.clone(), to = worldPosition(fromHexId(hex)); face(view, to); const started = performance.now();
+    const from = view.root.position.clone(), to = worldPosition(fromHexId(hex)); if (from.distanceToSquared(to) < 1e-8) continue; face(view, to); const started = performance.now();
     await new Promise<void>(resolve => {
       const step = () => { if (generation !== token) { resolve(); return; } const t = Math.min(1, (performance.now() - started) / 240); view.root.position.lerpVectors(from, to, t); if (t < 1) requestAnimationFrame(step); else resolve(); }; requestAnimationFrame(step);
     });
@@ -159,7 +169,7 @@ async function follow(view: UnitView, path: number[], token: number) {
 }
 async function projectile(source: UnitView, target: UnitView, token: number) {
   const shot = new THREE.Mesh(new THREE.SphereGeometry(.09, 8, 8), new THREE.MeshBasicMaterial({ color: '#ffdf8d' }));
-  const from = source.root.position.clone().add(new THREE.Vector3(0, 1.4, 0)), to = target.root.position.clone().add(new THREE.Vector3(0, 1.2, 0));
+  const from = source.visualPosition().add(new THREE.Vector3(0, source.height * .6, 0)), to = target.visualPosition().add(new THREE.Vector3(0, target.height * .5, 0));
   world.scene.add(shot); projectiles++; const start = performance.now();
   try { await new Promise<void>(resolve => { const step = () => { if (token !== generation) { resolve(); return; } const t = Math.min(1, (performance.now() - start) / 350); shot.position.lerpVectors(from, to, t); if (t < 1) requestAnimationFrame(step); else resolve(); }; requestAnimationFrame(step); }); }
   finally { projectiles--; shot.removeFromParent(); shot.geometry.dispose(); shot.material.dispose(); }
@@ -173,6 +183,13 @@ async function playback(events: EngineEvent[], token: number) {
       const line = document.createElement('div'); line.textContent = `${event.side ? '红方' : '蓝方'} · ${event.label ?? '施法'}`; $('#combat-log').append(line);
       const light = new THREE.PointLight('#b5d8ff', 8, 5); light.position.copy(selected.root.position).add(new THREE.Vector3(0, 2, 0)); world.scene.add(light);
       await pause(180); light.removeFromParent();
+    }
+    if (event.type === 'heal') {
+      applyState(event.after);
+      for (const restored of event.restored ?? []) {
+        const view = viewFor(restored.id); if (view) { const line = document.createElement('div'); line.textContent = `${view.unit.label}：恢复 ${restored.healed} HP`; $('#combat-log').append(line); }
+      }
+      await pause(180);
     }
     if (event.type === 'injury') {
       applyState(event.after);
@@ -262,6 +279,7 @@ function scheduleAI() {
   if (!actor || !$<HTMLInputElement>(controller(actor) ? '#ai-red' : '#ai-blue').checked) return;
   aiTimer = setTimeout(() => { aiTimer = undefined; void action('ai'); }, 400);
 }
+$('#heal-unit').onclick = () => void action('heal', { target: Number($<HTMLSelectElement>('#heal-target').value) });
 $('#ai-step').onclick = () => void action('ai');
 for (const id of ['#ai-blue', '#ai-red']) $(id).onchange = scheduleAI;
 async function action(kind: string, options: Record<string, unknown> = {}) {
@@ -272,7 +290,7 @@ async function action(kind: string, options: Record<string, unknown> = {}) {
     if (generation !== token) return;
     await playback(result.events, token);
     if (generation !== token) return;
-    state = result.state; applyState(state, true); world.showPath(null);
+    state = result.state; clearPreviewMachines(); applyState(state, true); world.showPath(null);
   } catch (error) { if (generation === token) { if (kind === 'ai') for (const id of ['#ai-blue', '#ai-red']) $<HTMLInputElement>(id).checked = false; message(error instanceof Error ? error.message : String(error)); } }
   finally { if (generation === token) { busy = false; updateSelection(); } }
 }
@@ -289,7 +307,7 @@ function nativeArmies() {
 }
 async function previewDeployment() {
   const request = ++deploymentRequest;
-  if (!state) deployment = undefined;
+  if (!state) { deployment = undefined; clearPreviewMachines(); }
   if (!connected || state || ![0, 1].every(team => views.some(v => v.unit.team === team))) { deploying = false; updateSelection(); return; }
   deploying = true; updateSelection();
   try {
@@ -297,12 +315,16 @@ async function previewDeployment() {
     if (request !== deploymentRequest || state) return;
     deployment = result.state;
     showHeroPreview(result.state.heroes);
+    for (const machine of result.state.units.filter(unit => unit.slot < 0)) {
+      const view = new UnitView({ id: `preview-${machine.id}`, kind: machine.creature, label: machine.label, team: machine.side, armySlot: -1, cell: fromHexId(machine.hex), initialCount: machine.count, hp: machine.health });
+      view.setFootprint(machine.footprint); world.scene.add(view.root); previewMachines.push(view);
+    }
     world.setObstacles(result.state.obstacles);
     if (result.state.scenario) world.setTerrain(result.state.scenario.terrain);
     $('#scenario-status').textContent = `${scenarios?.terrains.find(t => t.id === result.state.scenario?.terrain)?.label ?? '原生场景'} · 障碍占位 ${new Set(result.state.obstacles).size} 格`;
     for (const unit of result.state.units) {
       const view = views.find(v => v.unit.team === unit.side && v.unit.armySlot === unit.slot);
-      if (view) { view.unit.cell = fromHexId(unit.hex); view.root.position.copy(worldPosition(view.unit.cell)); }
+      if (view) { view.unit.cell = fromHexId(unit.hex); view.root.position.copy(worldPosition(view.unit.cell)); view.setFootprint(unit.footprint); }
     }
   } catch (error) { if (request === deploymentRequest) message(error instanceof Error ? error.message : String(error)); }
   finally { if (request === deploymentRequest) { deploying = false; updateSelection(); } }
@@ -354,7 +376,7 @@ function readCatalogue(info: EngineCatalogue) {
 }
 async function connect() {
   if (busy || state) return; busy = true; updateSelection(); $('#engine-status').textContent = '正在连接本地引擎…';
-  try { const info = await engine.connect(); heroesAvailable = info.heroSpells === true; aiAvailable = info.battleAI === "VCMI BattleEvaluator"; townPreset = info.tenWeekTownArmies; if (!$('#hero-configs').children.length) heroEditor($('#hero-configs'), info.spells ?? [], info.skills ?? [], () => void previewDeployment(), info.namedHeroes); readCatalogue(info); }
+  try { const info = await engine.connect(); heroesAvailable = info.heroSpells === true; aiAvailable = info.battleAI === "VCMI BattleEvaluator"; townPreset = info.tenWeekTownArmies; if (!$('#hero-configs').children.length) heroEditor($('#hero-configs'), info.spells ?? [], info.skills ?? [], () => void previewDeployment(), info.namedHeroes, info.equipment); readCatalogue(info); }
   catch (error) { connected = false; heroesAvailable = false; aiAvailable = false; townPreset = undefined; nativeCreatures.clear(); $('#engine-status').textContent = error instanceof Error ? error.message : '引擎连接失败'; }
   busy = false; updateSelection(); await previewDeployment();
 }
@@ -388,7 +410,7 @@ $('#start-battle').onclick = async () => {
   if (![0, 1].every(team => views.some(v => v.unit.team === team))) { message('双方均须有队伍。'); return; }
   startingArmy = configured(); busy = true; updateSelection(); slotViews.clear();
   const armies = [0, 1].map(team => views.filter(v => v.unit.team === team).sort((a, b) => a.unit.armySlot - b.unit.armySlot).map(v => { slotViews.set(`${team}:${v.unit.armySlot}`, v); return { creature: metadata(v.unit.kind).id, count: v.unit.initialCount, slot: v.unit.armySlot }; }));
-  try { const result = await engine.create(1337, armies, (heroesAvailable ? readHeroes() : undefined), readScenario()); state = result.state; applyState(state, true); $('#army-editor').removeAttribute('open'); message('双方阵容已进入战场。'); }
+  try { const result = await engine.create(1337, armies, (heroesAvailable ? readHeroes() : undefined), readScenario()); state = result.state; clearPreviewMachines(); applyState(state, true); $('#army-editor').removeAttribute('open'); message('双方阵容已进入战场。'); }
   catch (error) { message(error instanceof Error ? error.message : String(error)); }
   finally { busy = false; updateSelection(); }
 };
@@ -461,10 +483,10 @@ canvas.onpointermove = event => { if (event.buttons) { hideAttributes(); return;
   if (busy) return; const hit = raycaster.intersectObjects(world.pickable)[0]; world.hover.visible = !!hit; if (!hit) { world.showPath(null); return; } const cell = hit.object.userData.cell as Hex; world.hover.position.copy(worldPosition(cell)); world.hover.position.y = .035; const path = state?.legal?.moves.find(move => move.hex === toHexId(cell))?.path; world.showPath(path?.map(fromHexId) ?? null); };
 canvas.onpointerdown = event => { hideAttributes(); pressed.set(event.clientX, event.clientY); };
 canvas.onpointerup = event => { if (event.button !== 0 || busy || pressed.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 5) return; point(event);
-  const unit = raycaster.intersectObjects(views.filter(v => v.unit.hp > 0 || v.allowDeadTarget).map(v => v.proxy))[0]; if (unit) { const view = views.find(v => v.unit.id === unit.object.userData.unitId)!; if (chooseSpellTarget(nativeUnits.get(view.unit.id))) return; if (state && controller(nativeUnits.get(view.unit.id)) !== controller(nativeUnits.get(viewFor(state.activeStack!)?.unit.id ?? ''))) void attack(view); else selectView(view); return; }
+  const unit = raycaster.intersectObjects(views.filter(v => v.unit.hp > 0 || v.allowDeadTarget).map(v => v.proxy))[0]; if (unit) { const view = views.find(v => v.unit.id === unit.object.userData.unitId)!; if (chooseSpellTarget(nativeUnits.get(view.unit.id))) return; const native = nativeUnits.get(view.unit.id); if (native && state?.legal?.heals?.includes(native.id)) { $<HTMLSelectElement>('#heal-target').value = String(native.id); message('已选择治疗目标，点击「急救帐篷治疗」确认。'); return; } if (state && controller(nativeUnits.get(view.unit.id)) !== controller(nativeUnits.get(viewFor(state.activeStack!)?.unit.id ?? ''))) void attack(view); else selectView(view); return; }
   const tile = raycaster.intersectObjects(world.pickable)[0]; if (tile && !chooseSpellTarget(undefined, toHexId(tile.object.userData.cell))) void move(tile.object.userData.cell);
 };
-$('#overview').onclick = () => { world.resetCamera(); $('#overview').classList.add('active'); $('#closeup').classList.remove('active'); }; $('#closeup').onclick = () => { world.frameUnit(selected.root.position); $('#closeup').classList.add('active'); $('#overview').classList.remove('active'); };
+$('#overview').onclick = () => { world.resetCamera(); $('#overview').classList.add('active'); $('#closeup').classList.remove('active'); }; $('#closeup').onclick = () => { world.frameUnit(selected.visualPosition()); $('#closeup').classList.add('active'); $('#overview').classList.remove('active'); };
 $('#zoom-in').onclick = () => world.zoomBy(1.15); $('#zoom-out').onclick = () => world.zoomBy(1 / 1.15);
 $('#day').onclick = () => world.setMood(false); $('#dusk').onclick = () => world.setMood(true);
 $<HTMLInputElement>('#grid').onchange = event => { world.grid.visible = (event.target as HTMLInputElement).checked; };
@@ -494,16 +516,19 @@ function loadModel(view: UnitView) {
   });
 }
 async function importManifest() { if (!manifest) return; await Promise.allSettled(views.map(v => manifest!.units[v.unit.kind] ? v.setAsset(manifest!.units[v.unit.kind]) : Promise.resolve())); }
-$<HTMLSelectElement>('#background-picker').onchange = async event => { const url = (event.target as HTMLSelectElement).value; try { if (url) await world.setBackdrop(url); else { world.freeCamera(); world.resetCamera(); } } catch { message('背景载入失败。'); } };
+$<HTMLSelectElement>('#background-picker').onchange = async event => { const url = (event.target as HTMLSelectElement).value; try { if (url.startsWith('environment:')) { const id = url.slice(12); await world.setEnvironment(id, manifest!.environments![id]); } else if (url) { world.clearEnvironment(); await world.setBackdrop(url); } else { world.clearEnvironment(); world.freeCamera(); world.resetCamera(); } } catch { message('背景载入失败。'); } };
 async function boot() {
-  try { const response = await fetch('/local-assets/manifest.json'); if (response.ok && response.headers.get('content-type')?.includes('json')) { manifest = await response.json(); void importManifest().then(() => updateSelection()); for (const background of manifest?.backgrounds ?? []) $<HTMLSelectElement>('#background-picker').add(new Option(background.label, background.url)); if (manifest?.backgrounds?.length) { void world.setBackdrop(manifest.backgrounds[0].url).catch(() => message('背景载入失败，继续使用 3D 场景。')); $<HTMLSelectElement>('#background-picker').value = manifest.backgrounds[0].url; } } } catch { /* Stand-ins remain available. */ }
+  try { const response = await fetch('/local-assets/manifest.json', { cache: 'no-store' }); if (response.ok && response.headers.get('content-type')?.includes('json')) { manifest = await response.json(); void importManifest().then(() => updateSelection()); for (const background of manifest?.backgrounds ?? []) $<HTMLSelectElement>('#background-picker').add(new Option(background.label, background.url));
+      for (const [id, asset] of Object.entries(manifest?.environments ?? {})) $<HTMLSelectElement>('#background-picker').add(new Option(`${asset.label} · 3D`, `environment:${id}`));
+      const first = Object.entries(manifest?.environments ?? {})[0]; if (first) { $<HTMLSelectElement>('#background-picker').value = `environment:${first[0]}`; void world.setEnvironment(first[0], first[1]).catch(() => message('三维场景载入失败，使用默认场景。')); }
+    } } catch { /* Stand-ins remain available. */ }
   refreshCatalogue(); updateSelection(); $('#loading').classList.add('hidden'); void connect();
 }
-world.renderer.setAnimationLoop(() => { clock.update(); const dt = Math.min(clock.getDelta(), .05); views.forEach(v => v.update(dt, v === selected)); if (world.controls.enabled) world.controls.update(); world.renderer.render(world.scene, world.camera);
-  const rect = canvas.getBoundingClientRect(); for (const view of views) { const badge = badges.get(view.unit.id); if (!badge) continue; const point = view.root.position.clone().add(new THREE.Vector3(0, .15, 0)).project(world.camera); badge.hidden = view.unit.hp <= 0 || Math.abs(point.z) > 1; badge.textContent = String(count(view)); badge.style.left = `${rect.left + (point.x + 1) * rect.width / 2}px`; badge.style.top = `${rect.top + (1 - point.y) * rect.height / 2}px`; } });
+world.renderer.setAnimationLoop(() => { clock.update(); const dt = Math.min(clock.getDelta(), .05); views.forEach(v => v.update(dt, v === selected)); previewMachines.forEach(v => v.update(dt, false)); world.updateCamera(dt); world.renderer.render(world.scene, world.camera);
+  const rect = canvas.getBoundingClientRect(); for (const view of views) { const badge = badges.get(view.unit.id); if (!badge) continue; const point = view.visualPosition().add(new THREE.Vector3(0, .15, 0)).project(world.camera); badge.hidden = view.unit.hp <= 0 || Math.abs(point.z) > 1; badge.textContent = String(count(view)); badge.style.left = `${rect.left + (point.x + 1) * rect.width / 2}px`; badge.style.top = `${rect.top + (1 - point.y) * rect.height / 2}px`; } });
 function unitScreenPosition(view: UnitView) {
-  const rect = canvas.getBoundingClientRect(), point = view.root.position.clone().add(new THREE.Vector3(0, 1.3, 0)).project(world.camera);
+  const rect = canvas.getBoundingClientRect(), point = view.visualPosition().add(new THREE.Vector3(0, view.height / 2, 0)).project(world.camera);
   return { x: rect.left + (point.x + 1) * rect.width / 2, y: rect.top + (1 - point.y) * rect.height / 2 };
 }
-Object.assign(window, { battleLab: { snapshot: () => ({ connected, busy, deploying, projectiles, state, deployment, renderedObstacles: world.obstacleCount(), terrain: world.terrain(), backdrop: world.isBackdrop(), canvas: canvas.getBoundingClientRect().toJSON(), grid: world.grid.visible, draws: world.renderer.info.render.calls, units: views.map(v => ({ ...v.unit, screen: unitScreenPosition(v), count: count(v), native: nativeUnits.get(v.unit.id), imported: v.imported, animation: v.current, clips: v.clips.map(c => c.name), pose: v.poseSignature() })) }), move, attack: (targetId?: number) => { const target = targetId !== undefined ? viewFor(targetId) : views.find(v => controller(nativeUnits.get(v.unit.id)) !== controller(nativeUnits.get(viewFor(state?.activeStack ?? -1)?.unit.id ?? ''))); return target ? attack(target) : Promise.resolve(); } } });
+Object.assign(window, { battleLab: { snapshot: () => ({ connected, busy, deploying, projectiles, state, deployment, previewMachines: previewMachines.map(view => ({ ...view.unit })), renderedObstacles: world.obstacleCount(), terrain: world.terrain(), environment: world.environment(), backdrop: world.isBackdrop(), canvas: canvas.getBoundingClientRect().toJSON(), grid: world.grid.visible, camera: { position: world.camera.position.toArray(), target: world.controls.target.toArray(), enabled: world.controls.enabled }, draws: world.renderer.info.render.calls, units: views.map(v => ({ ...v.unit, screen: unitScreenPosition(v), count: count(v), native: nativeUnits.get(v.unit.id), imported: v.imported, animation: v.current, clips: v.clips.map(c => c.name), position: v.root.position.toArray(), visualPosition: v.visualPosition().toArray(), footprint: v.footprint, displayHeight: v.height, heading: v.root.rotation.y, modelYaw: v.model.rotation.y, pose: v.poseSignature() })) }), move, attack: (targetId?: number) => { const target = targetId !== undefined ? viewFor(targetId) : views.find(v => controller(nativeUnits.get(v.unit.id)) !== controller(nativeUnits.get(viewFor(state?.activeStack ?? -1)?.unit.id ?? ''))); return target ? attack(target) : Promise.resolve(); } } });
 void boot();

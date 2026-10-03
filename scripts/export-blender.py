@@ -306,7 +306,7 @@ def main():
                 exports.append((action, path))
             clips = pack_scene_variants(exports, opts.out / (identifier + '.glb')) if entry.get('sceneVariants') else pack_clips(exports, opts.out / (identifier + '.glb'), entry.get('geometryClip'))
         manifest['units'][identifier] = {'label': entry.get('label', labels.get(identifier, identifier)),
-                                        'url': f'/local-assets/{identifier}.glb', 'height': entry.get('height', 2.35), 'clips': clips,
+                                        'url': f'/local-assets/{identifier}.glb?v={hashlib.sha256((opts.out / (identifier + ".glb")).read_bytes()).hexdigest()[:16]}', 'height': entry.get('height', 2.35), 'clips': clips,
                                         'faction': entry.get('faction', '墓园'), 'draft': entry.get('draft', False)}
         print('EXPORTED', identifier, clips, flush=True)
     (opts.out / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2))

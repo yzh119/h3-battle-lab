@@ -32,10 +32,19 @@ def build(source, upstream_build, core, output, dependency_include, dependency_l
         copies.append(str(target))
     includes = [source, source / "include", source / "lib", source / "server", helpers, Path(dependency_include)]
     target_name = "battle-backend" if backend else "battle-probe"
+    machine_ai = []
+    if backend:
+        # Link the upstream AI's dedicated healing/tactics objects; never copy or
+        # implement its decision logic in the GUI or an independent rule engine.
+        for name in ("BattleAI.cpp.o", "TacticsHandler.cpp.o"):
+            obj = upstream_build / "AI/BattleAI/CMakeFiles/BattleAI.dir" / name
+            if not obj.is_file():
+                raise ValueError("A compatible Ninja build with ENABLE_BATTLE_AI is required")
+            machine_ai.append(str(obj))
     command = ["c++", "-std=c++20", *[f"-I{p}" for p in includes],
         str(Path(__file__).with_name(target_name + ".cpp").resolve()), *copies,
         *([str(source / "lib/json/JsonParser.cpp")] if backend else []),
-        str(upstream_build / "bin/libvcmiservercommon.a"), f"-L{core}", "-lvcmi-battle-lab",
+        *machine_ai, str(upstream_build / "bin/libvcmiservercommon.a"), f"-L{core}", "-lvcmi-battle-lab",
         f"-L{dependency_lib}", "-lboost_filesystem", "-lboost_program_options", "-lz",
         f"-Wl,-rpath,{core}", "-o", str(output / target_name)]
     subprocess.run(command, check=True)

@@ -26,6 +26,34 @@ test('public scene renders without art or engine; editing and camera remain avai
   expect((await snapshot(page)).units[0].count).toBe(45); expect(errors).toEqual([]);
 });
 
+test('WASD moves the camera relative to its heading and ignores text input', async ({ page }) => {
+  await missingArt(page); await open(page);
+  await page.locator('#overview').click();
+  const before = await snapshot(page);
+  const forward = before.camera.target.map((v: number, i: number) => v - before.camera.position[i]);
+  await page.keyboard.down('w');
+  await expect.poll(async () => (await snapshot(page)).camera.target).not.toEqual(before.camera.target);
+  await page.keyboard.up('w');
+  const after = await snapshot(page);
+  const delta = after.camera.target.map((v: number, i: number) => v - before.camera.target[i]);
+  expect(delta[0] * forward[0] + delta[2] * forward[2]).toBeGreaterThan(0);
+  expect(delta[1]).toBeCloseTo(0);
+  for (let i = 0; i < 3; i++) expect(after.camera.position[i] - before.camera.position[i]).toBeCloseTo(delta[i]);
+  expect(after.units.map((u: any) => u.position)).toEqual(before.units.map((u: any) => u.position));
+  await expect(page.locator('#stack-count')).toBeEnabled();
+  await page.locator('#stack-count').focus();
+  await expect(page.locator('#stack-count')).toBeFocused();
+  const focused = (await snapshot(page)).camera.target;
+  await page.keyboard.down('a'); await page.waitForTimeout(250); await page.keyboard.up('a');
+  expect((await snapshot(page)).camera.target).toEqual(focused);
+  await page.locator('#overview').click();
+  await page.keyboard.down('d'); await expect.poll(async () => (await snapshot(page)).camera.target).not.toEqual(focused);
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  const stopped = (await snapshot(page)).camera.target;
+  await page.waitForTimeout(250); expect((await snapshot(page)).camera.target).toEqual(stopped);
+  await page.keyboard.up('d');
+});
+
 test('army capacity, selection and custom format validation work without combat', async ({ page }) => {
   test.setTimeout(process.env.CI ? 180000 : 90000);
   await page.setViewportSize({ width: 800, height: 600 });
@@ -104,11 +132,27 @@ test('overview and close-up share canvas bounds and restore the selected backgro
   await missingArt(page);
   await page.route('**/local-assets/manifest.json', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ units: {}, backgrounds: [{ label: '画布测试', url: '/test-backdrop.svg' }] }) }));
   await page.route('**/test-backdrop.svg', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><rect width="1200" height="800" fill="#687850"/></svg>' }));
-  await open(page); await expect.poll(async () => (await snapshot(page)).backdrop).toBe(true);
+  await open(page); await page.locator('#background-picker').selectOption('/test-backdrop.svg'); await expect.poll(async () => (await snapshot(page)).backdrop).toBe(true);
+  if (process.env.BATTLE_LAB_BACKEND && process.env.BATTLE_LAB_PROFILE) await expect(page.locator('#start-battle')).toBeEnabled();
   const bounds = await page.locator('#battle').boundingBox();
+  async function checkCamera() {
+    const box = (await page.locator('#battle').boundingBox())!;
+    const x = box.x + box.width * .6, y = box.y + box.height * .55;
+    const before = await snapshot(page);
+    await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + 75, y + 30, { steps: 8 }); await page.mouse.up();
+    await expect.poll(async () => (await snapshot(page)).camera.position).not.toEqual(before.camera.position);
+    expect((await snapshot(page)).units.map((u: any) => u.cell)).toEqual(before.units.map((u: any) => u.cell));
+    const rotated = await snapshot(page);
+    await page.mouse.move(x, y); await page.mouse.down({ button: 'right' }); await page.mouse.move(x - 60, y + 25, { steps: 8 }); await page.mouse.up({ button: 'right' });
+    await expect.poll(async () => (await snapshot(page)).camera.target).not.toEqual(rotated.camera.target);
+    const panned = await snapshot(page); await page.mouse.wheel(0, -200);
+    await expect.poll(async () => (await snapshot(page)).camera.position).not.toEqual(panned.camera.position);
+  }
+  await checkCamera();
   await page.locator('#closeup').click(); expect((await snapshot(page)).backdrop).toBe(false);
   expect(await page.locator('#battle').boundingBox()).toEqual(bounds);
   await expect(page.locator('#closeup')).toHaveClass('active');
+  await checkCamera();
   await page.locator('#overview').click(); expect((await snapshot(page)).backdrop).toBe(true);
   expect(await page.locator('#battle').boundingBox()).toEqual(bounds);
   await page.setViewportSize({ width: 1000, height: 760 });
@@ -131,6 +175,12 @@ test('native ten-week complete-town button fills both seven-slot armies and supp
   await page.locator('#preset-upgraded').check(); await page.locator('#ten-week-armies').click(); await expect(page.locator('#ten-week-armies')).toBeEnabled();
   await expect(page.locator('#start-battle')).toBeEnabled();
   const upgraded = (await snapshot(page)).units;
+  for (const unit of upgraded) {
+    const native = (await snapshot(page)).deployment.units.find((u: any) => u.side === unit.team && u.slot === unit.armySlot);
+    expect(unit.footprint).toEqual(native.footprint);
+    if (native.footprint.length === 2) expect(unit.visualPosition[0]).not.toBe(unit.position[0]);
+  }
+  expect(upgraded.find((u: any) => u.kind === 'ghost-dragon').displayHeight).toBeGreaterThan(upgraded[0].displayHeight);
   expect(upgraded[0].kind).toBe('halberdier'); expect(upgraded[6].kind).toBe('archangel'); expect(upgraded[13].kind).toBe('ghost-dragon');
   await page.locator('#start-battle').click(); await expect(page.locator('#defend-turn')).toBeEnabled();
   const deployed = await snapshot(page);
@@ -174,6 +224,7 @@ test('local model with alternate skeleton scenes loads and animates', async ({ p
   const response = await request.get('/local-assets/manifest.json');
   test.skip(!response.headers()['content-type']?.includes('json'), 'Private art is absent');
   const manifest = await response.json(); test.skip(!manifest.units.cavalier, 'Alternate skeleton export absent');
+  await page.route('**/local-assets/manifest.json', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ units: { cavalier: manifest.units.cavalier } }) }));
   await open(page); await expect(page.locator('#replace-unit')).toBeEnabled();
   await page.locator('#creature-picker').selectOption('cavalier'); await page.locator('#replace-unit').click();
   await expect.poll(async () => (await snapshot(page)).units[0].kind, { timeout: 20000 }).toBe('cavalier');
@@ -187,7 +238,7 @@ test('hero spellbook casts native damage and renders summoned units', async ({ p
   test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
   await missingArt(page); const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
   await open(page); await expect(page.locator('#start-battle')).toBeEnabled();
-  await page.locator('#hero-editor summary').click(); await page.locator('#hero-enabled-0').check();
+  await page.locator('#hero-editor > summary').click(); await page.locator('#hero-enabled-0').check();
   await page.locator('#hero-spells-0').selectOption(['15', '68']);
   await expect(page.locator('#start-battle')).toBeEnabled(); await page.locator('#start-battle').click();
   await expect(page.locator('#defend-turn')).toBeEnabled(); await page.locator('#spellbook summary').click();
@@ -250,7 +301,7 @@ test('custom creature import uses native stats and survives reset, rejection and
   await page.locator('#creature-import').setInputFiles('examples/custom-creatures.json');
   await expect(page.locator('#creature-import-status')).toContainText('原引擎会话已保留');
   await expect(page.locator('#creature-picker option')).toHaveCount(29);
-  await page.locator('#hero-editor summary').click(); await page.locator('#hero-enabled-0').check();
+  await page.locator('#hero-editor > summary').click(); await page.locator('#hero-enabled-0').check();
   await page.locator('#hero-attack-0').fill('12');
   await expect(page.locator('#connect-engine')).toBeEnabled(); await page.locator('#connect-engine').click();
   await expect(page.locator('#start-battle')).toBeEnabled(); await expect(page.locator('#engine-status')).toContainText('自定义模式');
@@ -307,6 +358,8 @@ test('native terrain and obstacle previews match combat and remain visible with 
   await expect(page.locator('#start-battle')).toBeEnabled();
   await page.locator('#terrain-picker').selectOption('2'); await page.locator('#native-obstacles').check();
   await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#background-picker').selectOption('/scenario-backdrop.svg');
+  await expect.poll(async () => (await snapshot(page)).backdrop).toBe(true);
   let before = await snapshot(page);
   expect(before.deployment.scenario).toEqual({ terrain: 2, battlefield: 'core:grass_pines', obstacles: true, layout: 148 });
   expect(before.terrain).toBe(2); expect(before.backdrop).toBe(true);
@@ -340,7 +393,7 @@ test('named heroes keep native specialties, leveling and editable spellbooks', a
   test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
   await missingArt(page); const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
   await open(page); await expect(page.locator('#start-battle')).toBeEnabled();
-  await page.locator('#hero-editor summary').click();
+  await page.locator('#hero-editor > summary').click();
   await expect(page.locator('#hero-type-0 option')).toHaveCount(33);
   await page.locator('#hero-enabled-0').check(); await page.locator('#hero-type-0').selectOption('71');
   await page.locator('#hero-level-0').fill('20'); await page.locator('#hero-level-0').press('Tab');
@@ -370,4 +423,123 @@ test('named heroes keep native specialties, leveling and editable spellbooks', a
   await page.locator('#cast-spell').click(); await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
   await expect(page.locator('#combat-log')).toContainText('Magic Arrow');
   expect((await snapshot(page)).state.heroes[0].type).toBe(71); expect(errors).toEqual([]);
+});
+
+
+test('equipment preserves base attributes and native combination slots and scroll spells', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  await missingArt(page); await open(page); await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#hero-editor > summary').click(); await page.locator('#hero-enabled-0').check(); await page.locator('#hero-type-0').selectOption('71');
+  await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#hero-equipment-0 summary').click(); await page.locator('#hero-artifact-0-3').selectOption('7');
+  await expect(page.locator('#start-battle')).toBeEnabled();
+  const equipped = (await snapshot(page)).deployment.heroes[0]; expect(equipped.attack).toBe(equipped.base.attack + 2);
+  await expect(page.locator('#hero-attack-0')).toHaveValue(String(equipped.base.attack));
+  await page.locator('#hero-override-0').check(); await expect(page.locator('#start-battle')).toBeEnabled();
+  expect((await snapshot(page)).deployment.heroes[0].attack).toBe(equipped.attack);
+  await page.locator('#hero-artifact-0-3').selectOption('129'); await expect(page.locator('#start-battle')).toBeEnabled();
+  await expect(page.locator('#hero-artifact-0-0')).toBeDisabled();
+  await expect(page.locator('#hero-equipment-status-0')).toContainText('组合占位');
+  await page.locator('#hero-artifact-0-3').selectOption('7'); await expect(page.locator('#start-battle')).toBeEnabled(); await expect(page.locator('#hero-artifact-0-0')).toBeEnabled();
+  await page.locator('#hero-knowledge-0').fill('10'); await page.locator('#hero-power-0').fill('3'); await page.locator('#hero-power-0').press('Tab');
+  await page.locator('#hero-artifact-0-9').selectOption('1'); await page.locator('#hero-scroll-0-9').selectOption('68');
+  await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#start-battle').click(); await expect(page.locator('#defend-turn')).toBeEnabled();
+  expect((await snapshot(page)).state.heroes[0].attack).toBe(equipped.attack);
+  await page.locator('#spellbook summary').click(); await page.locator('#spell-picker').selectOption('68'); await expect(page.locator('#cast-spell')).toBeEnabled();
+  await page.locator('#cast-spell').click(); await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+  expect((await snapshot(page)).units.some((u: any) => u.native?.creature === 'core:waterElemental')).toBe(true);
+  await page.locator('#reset').click(); await expect(page.locator('#start-battle')).toBeEnabled();
+  await expect(page.locator('#hero-artifact-0-3')).toHaveValue('7'); await expect(page.locator('#hero-scroll-0-9')).toHaveValue('68');
+});
+
+test('ballista and ammo cart render outside army slots and use native double shots', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  await missingArt(page); const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
+  await open(page); await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#creature-picker').selectOption('zombie'); await page.locator('#replace-unit').click(); await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#hero-editor > summary').click(); await page.locator('#hero-enabled-0').check(); await page.locator('#hero-spells-0').selectOption([]);
+  await page.locator('#hero-skill-0-0').selectOption('20'); await page.locator('#hero-skill-level-0-0').selectOption('3');
+  await page.locator('#hero-equipment-0 summary').click(); await page.locator('#hero-artifact-0-13').selectOption('4'); await page.locator('#hero-artifact-0-14').selectOption('5');
+  await expect(page.locator('#start-battle')).toBeEnabled();
+  const before = await snapshot(page); expect(before.units).toHaveLength(2); expect(before.previewMachines).toHaveLength(2);
+  expect(before.previewMachines.map((u: any) => u.kind)).toEqual(expect.arrayContaining(['core:ballista', 'core:ammoCart']));
+  await expect(page.locator('.army-slot')).toHaveCount(14);
+  await page.locator('#start-battle').click(); await expect(page.locator('#defend-turn')).toBeEnabled();
+  expect((await snapshot(page)).units).toHaveLength(4); expect((await snapshot(page)).previewMachines).toHaveLength(0);
+  for (let i = 0; i < 10; i++) {
+    const current = await snapshot(page); if (current.state.units.find((u: any) => u.id === current.state.activeStack).creature === 'core:ballista') break;
+    await page.locator('#defend-turn').click(); await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+  }
+  const current = await snapshot(page), enemy = current.state.units.find((u: any) => u.side === 1);
+  expect(current.state.units.find((u: any) => u.id === current.state.activeStack).creature).toBe('core:ballista');
+  await page.evaluate(id => { void (window as any).battleLab.attack(id); }, enemy.id);
+  await expect.poll(async () => (await snapshot(page)).busy, { timeout: 15000 }).toBe(false);
+  await expect(page.locator('#combat-log p')).toHaveCount(2); await expect(page.locator('#combat-log')).toContainText('Ballista');
+  await page.screenshot({ path: '.local/native-war-machines.png' });
+  await page.locator('#reset').click(); await expect(page.locator('#start-battle')).toBeEnabled();
+  expect((await snapshot(page)).units).toHaveLength(2); expect((await snapshot(page)).previewMachines).toHaveLength(2); expect(errors).toEqual([]);
+});
+
+test('first aid tent uses native healing targets and updates rendered health', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  await missingArt(page); await open(page); await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#creature-picker').selectOption('archangel'); await page.locator('#stack-count').fill('5'); await page.locator('#replace-unit').click(); await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('.army-slot[data-team="1"][data-slot="0"]').click(); await page.locator('#creature-picker').selectOption('marksman'); await page.locator('#replace-unit').click();
+  await page.locator('#hero-editor > summary').click(); await page.locator('#hero-enabled-0').check(); await page.locator('#hero-spells-0').selectOption([]);
+  await page.locator('#hero-skill-0-0').selectOption('27'); await page.locator('#hero-skill-level-0-0').selectOption('3');
+  await page.locator('#hero-equipment-0 summary').click(); await page.locator('#hero-artifact-0-15').selectOption('6');
+  await expect(page.locator('#start-battle')).toBeEnabled(); await page.locator('#start-battle').click(); await expect(page.locator('#defend-turn')).toBeEnabled();
+  const started = await snapshot(page), angel = started.state.units.find((u: any) => u.creature === 'core:archangel');
+  await page.locator('#defend-turn').click(); await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+  await page.evaluate(id => { void (window as any).battleLab.attack(id); }, angel.id); await expect.poll(async () => (await snapshot(page)).busy, { timeout: 15000 }).toBe(false);
+  await expect(page.locator('#heal-unit')).toBeEnabled(); const hurt = (await snapshot(page)).state.units.find((u: any) => u.id === angel.id); expect(hurt.health).toBeLessThan(angel.health);
+  await page.locator('#heal-unit').click(); await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+  const healed = (await snapshot(page)).units.find((u: any) => u.native?.id === angel.id);
+  expect(healed.hp).toBe(angel.health); expect(healed.count).toBe(hurt.count); await expect(page.locator('#combat-log')).toContainText('恢复');
+});
+
+
+test('imported champion faces the native movement direction instead of strafing', async ({ page, request }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  const response = await request.get('/local-assets/manifest.json');
+  test.skip(!response.ok() || !response.headers()['content-type']?.includes('json'), 'Local art absent');
+  const manifest = await response.json(); test.skip(!manifest.units.champion, 'Champion model absent');
+  await page.route('**/local-assets/manifest.json', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ units: { champion: manifest.units.champion } }) }));
+  await open(page); await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#creature-picker').selectOption('champion'); await page.locator('#replace-unit').click();
+  await expect.poll(async () => (await snapshot(page)).units[0].imported, { timeout: 60000 }).toBe(true);
+  expect((await snapshot(page)).units[0].modelYaw).toBeCloseTo(Math.PI / 2);
+  await expect(page.locator('#start-battle')).toBeEnabled(); await page.locator('#start-battle').click(); await expect(page.locator('#defend-turn')).toBeEnabled();
+  const initial = await snapshot(page), actor = initial.state.units.find((u: any) => u.id === initial.state.activeStack);
+  expect(actor.creature).toBe('core:champion');
+  const destination = initial.state.legal.moves.find((m: any) => m.path.length >= 4 && m.hex % 17 > actor.hex % 17 + 1 && Math.floor(m.hex / 17) !== Math.floor(actor.hex / 17));
+  expect(destination).toBeTruthy();
+  await page.evaluate(async hex => { const p = await import(/* @vite-ignore */ '/src/presentation.ts'); void (window as any).battleLab.move(p.fromHexId(hex)); }, destination.hex);
+  await expect.poll(async () => (await snapshot(page)).units[0].animation).toBe('walk');
+  let previous = (await snapshot(page)).units[0], samples = 0;
+  for (let i = 0; i < 50; i++) {
+    await page.waitForTimeout(30); const current = await snapshot(page), view = current.units[0];
+    const dx = view.position[0] - previous.position[0], dz = view.position[2] - previous.position[2], distance = Math.hypot(dx, dz);
+    if (view.animation === 'walk' && distance > .005 && Math.abs(view.heading - previous.heading) < .01) {
+      // Corrected horse -X points along root +Z, which must match actual displacement.
+      expect((Math.sin(view.heading) * dx + Math.cos(view.heading) * dz) / distance).toBeGreaterThan(.99); samples++;
+    }
+    previous = view; if (!current.busy) break;
+  }
+  expect(samples).toBeGreaterThan(2); await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+  expect((await snapshot(page)).units[0].native.hex).toBe(destination.hex);
+  await page.locator('#closeup').click(); await page.screenshot({ path: '.local/champion-facing-fixed.png' });
+});
+
+
+test('failed imported 3D environment keeps the public scene and controls usable', async ({ page }) => {
+  await missingArt(page);
+  await page.route('**/local-assets/manifest.json', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ units: {}, environments: { missing: { label: '缺失场景', ground: '/local-assets/missing-ground.png', pieces: [{ url: '/local-assets/missing-scene.glb', height: 9, instances: [{ position: [28, 0, -22] }] }] } } }) }));
+  const errors: string[] = []; page.on('pageerror', e => errors.push(e.message)); await open(page);
+  await expect(page.locator('#toast')).toContainText('三维场景载入失败');
+  expect((await snapshot(page)).environment).toBeUndefined(); expect((await snapshot(page)).draws).toBeGreaterThan(0);
+  await page.locator('#closeup').click(); expect((await snapshot(page)).camera.enabled).toBe(true);
+  await page.locator('#creature-picker').selectOption('archer'); await page.locator('#replace-unit').click();
+  expect((await snapshot(page)).units[0].kind).toBe('archer'); expect(errors).toEqual([]);
 });

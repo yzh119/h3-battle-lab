@@ -11,10 +11,11 @@ export interface EngineState {
   scenario?: ScenarioConfig;
   revision: number; round: number; activeStack: number | null; winner?: number | null;
   heroes?: (NativeHero | null)[]; units: NativeUnit[]; obstacles: number[]; queue?: number[];
-  legal?: { wait: boolean; defend: boolean; moves: { hex: number; path: number[] }[];
+  legal?: { heals?: number[]; wait: boolean; defend: boolean; moves: { hex: number; path: number[] }[];
     shots: number[]; melee: { target: number; from: number }[] };
 }
 export interface EngineEvent {
+  restored?: { id: number; healed: number }[];
   spell?: number; label?: string; side?: number; affected?: number[];
   type: string; before: EngineState; after: EngineState;
   stack?: number; path?: number[]; attacker?: number; ranged?: boolean; counter?: boolean;
@@ -23,8 +24,10 @@ export interface EngineEvent {
 export interface SpellDefinition { id: number; label: string; key: string; level: number }
 export interface NamedHero { id: number; key: string; label: string; class: string; faction: string; specialty: string; description: string }
 export interface NamedHeroCatalogue { maxLevel: number; heroes: NamedHero[] }
-export interface NativeHero { type?: number | null; label?: string; level?: number; experience?: number; skills?: { id: number; level: number }[]; side: number; mana: number; maxMana: number; attack: number; defense: number; power: number; knowledge: number; spells: (SpellDefinition & { cost: number; castable: boolean })[] }
-export interface HeroConfig { type?: number; level?: number; attack?: number; defense?: number; power?: number; knowledge?: number; mana?: number; skills?: { id: number; level: number }[]; spells?: number[] }
+export interface EquippedArtifact { slot: number; artifact: number; spell?: number; locked?: boolean; label?: string }
+export interface EquipmentCatalogue { slots: { id: number }[]; artifacts: { id: number; key: string; label: string; description: string; slots: number[]; combined: boolean; scroll: boolean; creature?: string }[] }
+export interface NativeHero { artifacts?: EquippedArtifact[]; base?: { attack: number; defense: number; power: number; knowledge: number }; type?: number | null; label?: string; level?: number; experience?: number; skills?: { id: number; level: number }[]; side: number; mana: number; maxMana: number; attack: number; defense: number; power: number; knowledge: number; spells: (SpellDefinition & { cost: number; castable: boolean })[] }
+export interface HeroConfig { artifacts?: EquippedArtifact[]; type?: number; level?: number; attack?: number; defense?: number; power?: number; knowledge?: number; mana?: number; skills?: { id: number; level: number }[]; spells?: number[] }
 export type SpellTarget = { unit?: number; hex?: number }[];
 export interface NativeCreature { id: number; key: string; label: string; health: number; speed: number; attack: number; defense: number; minDamage: number; maxDamage: number; shots: number; doubleWide: boolean; art?: string; faction?: string; custom?: boolean }
 export interface EngineResult { state: EngineState; events: EngineEvent[] }
@@ -32,7 +35,7 @@ export interface ArmyStack { creature: number; count: number; slot?: number; hex
 export interface TownArmyPreset { weeks: number; profile: string; armies: { slot: number; base: number; upgraded: number; weekly: number; count: number }[][] }
 export interface ScenarioConfig { terrain: number; battlefield: string; obstacles: boolean; layout: number }
 export interface ScenarioCatalogue { default: ScenarioConfig; layoutCount: number; terrains: { id: number; key: string; label: string; battlefields: { key: string; label: string; special: boolean }[] }[] }
-export interface EngineCatalogue { namedHeroes?: NamedHeroCatalogue; scenarios?: ScenarioCatalogue; backend: string; battleAI?: string; spells: SpellDefinition[]; skills: { id: number; label: string }[]; tenWeekTownArmies: TownArmyPreset; creatures: NativeCreature[]; rulesProfile: string; customPacks: boolean; customMechanisms?: string[]; heroSpells: boolean; creatureSpells?: boolean }
+export interface EngineCatalogue { equipment?: EquipmentCatalogue; namedHeroes?: NamedHeroCatalogue; scenarios?: ScenarioCatalogue; backend: string; battleAI?: string; spells: SpellDefinition[]; skills: { id: number; label: string }[]; tenWeekTownArmies: TownArmyPreset; creatures: NativeCreature[]; rulesProfile: string; customPacks: boolean; customMechanisms?: string[]; heroSpells: boolean; creatureSpells?: boolean }
 export class EngineClient {
   private session?: string;
   private loadedPack?: CreaturePack;

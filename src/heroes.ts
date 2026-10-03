@@ -1,7 +1,7 @@
 /** Hero configuration and spell target labels. Rules stay in the engine. */
-import type { HeroConfig, SpellDefinition, NativeUnit, SpellTarget, NativeHero, NamedHeroCatalogue } from './engine.ts';
+import type { HeroConfig, SpellDefinition, NativeUnit, SpellTarget, NativeHero, NamedHeroCatalogue, EquipmentCatalogue } from './engine.ts';
 
-export function heroEditor(root: HTMLElement, spells: SpellDefinition[], skills: { id: number; label: string }[], changed: () => void, named?: NamedHeroCatalogue) {
+export function heroEditor(root: HTMLElement, spells: SpellDefinition[], skills: { id: number; label: string }[], changed: () => void, named?: NamedHeroCatalogue, equipment?: EquipmentCatalogue) {
   root.replaceChildren();
   for (const side of [0, 1]) {
     const group = document.createElement('fieldset'); group.className = 'hero-config';
@@ -29,7 +29,7 @@ export function heroEditor(root: HTMLElement, spells: SpellDefinition[], skills:
       });
       const preview = document.createElement('p'); preview.id = `hero-preview-${side}`; group.append(preview);
     }
-    for (const [field, label, value] of [['attack', '攻击', 2], ['defense', '防御', 2], ['power', '法强', 3], ['knowledge', '知识', 10]] as const) {
+    for (const [field, label, value] of [['attack', '基础攻击', 2], ['defense', '基础防御', 2], ['power', '基础法强', 3], ['knowledge', '基础知识', 10]] as const) {
       const row = document.createElement('label'); row.textContent = label;
       const input = document.createElement('input'); input.type = 'number'; input.min = '0'; input.max = '99'; input.step = '1'; input.value = String(value); input.id = `hero-${field}-${side}`; row.append(input); group.append(row);
     }
@@ -46,6 +46,22 @@ export function heroEditor(root: HTMLElement, spells: SpellDefinition[], skills:
     spells.forEach(spell => { const option = new Option(`${spell.label} · ${spell.level} 级`, String(spell.id)); option.selected = spell.id === 15; learned.add(option); });
     label.append(learned); group.append(label);
     const all = document.createElement('button'); all.type = 'button'; all.textContent = '选择全部战斗魔法'; all.onclick = () => { [...learned.options].forEach(option => option.selected = true); changed(); }; group.append(all);
+    if (equipment) {
+      const inventory = document.createElement('details'); inventory.id = `hero-equipment-${side}`;
+      const summary = document.createElement('summary'); summary.textContent = '战斗装备与战争机器'; inventory.append(summary);
+      const note = document.createElement('p'); note.textContent = '空选项保留英雄自带装备。组合宝物的占位由引擎检查。'; inventory.append(note);
+      for (const slot of equipment.slots) {
+        const label = document.createElement('label'); label.textContent = artifactSlotLabel(slot.id);
+        const select = document.createElement('select'); select.id = `hero-artifact-${side}-${slot.id}`; select.dataset.equipment = 'true'; select.setAttribute('aria-label', `${side ? '红' : '蓝'}方${artifactSlotLabel(slot.id)}`);
+        select.add(new Option('默认／不额外装备', '')); select.add(new Option('不装备（移除默认）', '-1')); equipment.artifacts.filter(art => art.slots.includes(slot.id)).forEach(art => select.add(new Option(`${art.label}${art.combined ? ' · 组合宝物' : ''}`, String(art.id))));
+        const scroll = document.createElement('select'); scroll.id = `hero-scroll-${side}-${slot.id}`; scroll.dataset.equipment = 'true'; scroll.setAttribute('aria-label', `${side ? '红' : '蓝'}方${artifactSlotLabel(slot.id)}卷轴魔法`); scroll.hidden = true;
+        spells.forEach(spell => scroll.add(new Option(spell.label, String(spell.id))));
+        select.addEventListener('change', () => { scroll.hidden = !equipment.artifacts.find(art => String(art.id) === select.value)?.scroll; });
+        label.append(select, scroll); inventory.append(label);
+      }
+      const clear = document.createElement('button'); clear.type = 'button'; clear.dataset.equipment = 'true'; clear.textContent = '清空额外装备'; clear.onclick = () => { inventory.querySelectorAll<HTMLSelectElement>('select').forEach(select => { delete select.dataset.locked; if (select.id.includes('artifact')) select.value = ''; else select.hidden = true; }); changed(); }; inventory.append(clear);
+      const status = document.createElement('p'); status.id = `hero-equipment-status-${side}`; inventory.append(status); group.append(inventory);
+    }
     group.onchange = changed; root.append(group);
   }
 }
@@ -54,6 +70,12 @@ export function readHeroes(): (HeroConfig | null)[] {
     if (!document.querySelector<HTMLInputElement>(`#hero-enabled-${side}`)?.checked) return null;
     const type = document.querySelector<HTMLSelectElement>(`#hero-type-${side}`)?.value;
     const config: HeroConfig = {};
+    const equipped = [...document.querySelectorAll<HTMLSelectElement>(`#hero-equipment-${side} select[id^="hero-artifact"]`)];
+    if (equipped.length) config.artifacts = equipped.filter(select => select.value !== '').map(select => {
+      const slot = Number(select.id.split('-').at(-1)), artifact = Number(select.value);
+      const scroll = document.querySelector<HTMLSelectElement>(`#hero-scroll-${side}-${slot}`)!;
+      return { slot, artifact, ...(scroll.hidden ? {} : { spell: Number(scroll.value) }) };
+    });
     if (type) {
       const level = document.querySelector<HTMLInputElement>(`#hero-level-${side}`)!;
       if (!Number.isInteger(level.valueAsNumber) || level.valueAsNumber < 1 || level.valueAsNumber > Number(level.max)) throw new Error(`英雄等级须为 1–${level.max} 的整数。`);
@@ -89,16 +111,21 @@ export function setHeroEditorDisabled(locked: boolean, pending = false) {
     const overriding = document.querySelector<HTMLInputElement>(`#hero-override-${side}`)?.checked;
     document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>(`#hero-configs fieldset:nth-child(${side + 1}) input, #hero-configs fieldset:nth-child(${side + 1}) select, #hero-configs fieldset:nth-child(${side + 1}) button`).forEach(input => {
       const presetControl = ['enabled', 'type', 'level', 'override'].some(field => input.id === `hero-${field}-${side}`);
-      input.disabled = locked || (!presetControl && !!type && !overriding) || ((input.id === `hero-level-${side}` || input.id === `hero-override-${side}`) && !type) || (input.id === `hero-override-${side}` && pending);
+      input.disabled = locked || (!presetControl && !input.dataset.equipment && !!type && !overriding) || ((input.id === `hero-level-${side}` || input.id === `hero-override-${side}`) && !type) || (input.id === `hero-override-${side}` && pending) || input.dataset.locked === 'true';
     });
   }
 }
 export function showHeroPreview(heroes?: (NativeHero | null)[]) {
   for (const side of [0, 1]) {
     const hero = heroes?.[side], preview = document.querySelector<HTMLElement>(`#hero-preview-${side}`);
-    if (preview) preview.textContent = hero ? `${hero.label} · ${hero.level} 级 · 魔力 ${hero.mana}/${hero.maxMana}` : '英雄未参战';
+    if (preview) preview.textContent = hero ? `${hero.label} · ${hero.level} 级 · 魔力 ${hero.mana}/${hero.maxMana} · 攻 ${hero.attack} / 防 ${hero.defense} / 法 ${hero.power} / 知 ${hero.knowledge}` : '英雄未参战';
+    const status = document.querySelector<HTMLElement>(`#hero-equipment-status-${side}`);
+    if (status) status.textContent = hero?.artifacts?.filter(art => art.slot !== 16).map(art => `${artifactSlotLabel(art.slot)}：${art.label}${art.locked ? '（组合占位）' : ''}`).join('；') ?? '英雄未参战';
+    document.querySelectorAll<HTMLSelectElement>(`#hero-equipment-${side} select[id^="hero-artifact"]`).forEach(select => {
+      const slot = Number(select.id.split('-').at(-1)); select.dataset.locked = String(hero?.artifacts?.some(art => art.slot === slot && art.locked) ?? false);
+    });
     if (!hero || !document.querySelector<HTMLSelectElement>(`#hero-type-${side}`)?.value || document.querySelector<HTMLInputElement>(`#hero-override-${side}`)!.checked) continue;
-    for (const field of ['attack', 'defense', 'power', 'knowledge'] as const) document.querySelector<HTMLInputElement>(`#hero-${field}-${side}`)!.value = String(hero[field]);
+    for (const field of ['attack', 'defense', 'power', 'knowledge'] as const) document.querySelector<HTMLInputElement>(`#hero-${field}-${side}`)!.value = String(hero.base?.[field] ?? hero[field]);
     for (let slot = 0; slot < 8; ++slot) {
       const skill = hero.skills?.[slot];
       document.querySelector<HTMLSelectElement>(`#hero-skill-${side}-${slot}`)!.value = skill ? String(skill.id) : '';
@@ -107,4 +134,8 @@ export function showHeroPreview(heroes?: (NativeHero | null)[]) {
     const learned = new Set(hero.spells.map(spell => spell.id));
     [...document.querySelector<HTMLSelectElement>(`#hero-spells-${side}`)!.options].forEach(option => option.selected = learned.has(Number(option.value)));
   }
+}
+
+function artifactSlotLabel(slot: number) {
+  return ['头部', '披风', '项链', '右手', '左手', '躯干', '右戒指', '左戒指', '足部', '杂物 1', '杂物 2', '杂物 3', '杂物 4', '弩车', '弹药车', '急救帐篷', '投石车', '魔法书', '杂物 5'][slot] ?? `装备槽 ${slot}`;
 }

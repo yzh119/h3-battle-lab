@@ -4,6 +4,8 @@
 #include "lib/json/JsonParser.h"
 #include "lib/entities/hero/CHeroHandler.h"
 #include "lib/entities/hero/CHeroClass.h"
+#include "lib/entities/artifact/CArtHandler.h"
+#include "AI/BattleAI/BattleAI.h"
 #include "lib/mapObjects/CGTownInstance.h"
 #include "lib/battle/ReachabilityInfo.h"
 #include "server/queries/BattleQueries.h"
@@ -171,12 +173,41 @@ JsonNode heroCatalogue()
     return result;
 }
 
+bool allowedArtifact(int id)
+{
+    if (id < 0 || id > 140 || id == 2 || id == 3) return false;
+    const auto * artifact = ArtifactID(id).toArtifact();
+    return artifact && artifact->getModScope() == "core" && artifact->getPossibleSlots().contains(ArtBearer::HERO);
+}
+
+JsonNode artifactCatalogue()
+{
+    JsonNode result;
+    for (int slot = 0; slot <= 18; ++slot) {
+        if (slot == 16) continue; // Catapults belong to the future siege fixture.
+        JsonNode entry; entry["id"].Integer() = slot;
+        result["slots"].Vector().push_back(std::move(entry));
+    }
+    for (int id = 0; id <= 140; ++id) {
+        if (!allowedArtifact(id)) continue;
+        const auto * art = ArtifactID(id).toArtifact();
+        JsonNode entry; entry["id"].Integer() = id; entry["key"].String() = art->getJsonKey();
+        entry["label"].String() = art->getNameTranslated(); entry["description"].String() = art->getDescriptionTranslated();
+        entry["combined"].Bool() = art->isCombined(); entry["scroll"].Bool() = id == static_cast<int>(ArtifactID::SPELL_SCROLL);
+        if (art->getWarMachine().hasValue()) entry["creature"].String() = art->getWarMachine().toCreature()->getJsonKey();
+        for (const auto & slot : art->getPossibleSlots().at(ArtBearer::HERO)) if (slot.getNum() != 16) entry["slots"].Vector().emplace_back(slot.getNum());
+        result["artifacts"].Vector().push_back(std::move(entry));
+    }
+    return result;
+}
+
 JsonNode catalogue()
 {
     JsonNode result;
     result["backend"].String() = "vcmi-native";
     result["scenarios"] = scenarioCatalogue();
     result["namedHeroes"] = heroCatalogue();
+    result["equipment"] = artifactCatalogue();
     result["rulesProfile"].String() = customDefinitions.empty() ? "base-reference" : "custom-reference";
     result["customPacks"].Bool() = true;
     for (const auto * mechanism : {"flying", "additionalAttacks", "regeneration", "retaliations", "blocksRetaliation", "shooter", "undead", "deathCloud"})
@@ -285,12 +316,28 @@ public:
         if (!heroes.isNull()) for (const auto & hero : heroes.Vector())
         {
             if (hero.isNull()) continue;
-            fields(hero, {"attack", "defense", "power", "knowledge", "mana", "skills", "spells", "type", "level"});
+            fields(hero, {"attack", "defense", "power", "knowledge", "mana", "skills", "spells", "type", "level", "artifacts"});
             const bool named = !hero["type"].isNull();
             if (named && !allowedHero(integer(hero["type"], 0, 79))) throw std::runtime_error("Original Castle/Necropolis heroes only");
             if (!hero["level"].isNull()) { if (!named) throw std::runtime_error("Hero level requires a named hero"); integer(hero["level"], 1, maxPresetHeroLevel()); }
             for (const auto * attribute : {"attack", "defense", "power", "knowledge"})
                 if (!named || !hero[attribute].isNull()) integer(hero[attribute], 0, 99);
+            if (!hero["artifacts"].isNull()) {
+                if (!hero["artifacts"].isVector() || hero["artifacts"].Vector().size() > 18) throw std::runtime_error("At most eighteen equipped artifacts");
+                std::set<int> slots;
+                for (const auto & entry : hero["artifacts"].Vector()) {
+                    fields(entry, {"slot", "artifact", "spell"});
+                    const int slot = integer(entry["slot"], 0, 18), id = integer(entry["artifact"], -1, 140);
+                    if (slot == 16 || !slots.insert(slot).second || (id != -1 && !allowedArtifact(id))) throw std::runtime_error("Unsupported artifact or duplicate slot");
+                    if (id == -1) { if (!entry["spell"].isNull()) throw std::runtime_error("Removed equipment cannot carry a spell"); continue; }
+                    const auto & possible = ArtifactID(id).toArtifact()->getPossibleSlots().at(ArtBearer::HERO);
+                    if (std::find(possible.begin(), possible.end(), ArtifactPosition(slot)) == possible.end()) throw std::runtime_error("Artifact does not fit this slot");
+                    if (id == static_cast<int>(ArtifactID::SPELL_SCROLL)) {
+                        const auto * spell = SpellID(integer(entry["spell"], 0, 69)).toSpell();
+                        if (!spell->isCombat() || spell->isCreatureAbility()) throw std::runtime_error("Original combat scroll required");
+                    } else if (!entry["spell"].isNull()) throw std::runtime_error("Only a scroll may specify a spell");
+                }
+            }
             if (!hero["mana"].isNull()) integer(hero["mana"], 0, 99999);
             if ((!named || !hero["skills"].isNull()) && (!hero["skills"].isVector() || hero["skills"].Vector().size() > 8)) throw std::runtime_error("At most eight secondary skills");
             std::set<int> skills;
@@ -314,7 +361,8 @@ public:
             const int type = config["type"].isNull() ? side : config["type"].Integer();
             const int level = config["level"].isNull() ? 1 : config["level"].Integer();
             builder.hero(side ? int3{7, 7, 0} : int3{5, 5, 0}, HeroTypeID(type), PlayerColor(side))
-                .heroGarrison({{CreatureID(0), 1}}).heroExperience(LIBRARY->heroh->reqExp(level));
+                .heroExperience(LIBRARY->heroh->reqExp(level));
+            if (config["type"].isNull()) builder.heroGarrison({{CreatureID(0), 1}});
             server.namedHeroes[side] = !config["type"].isNull();
         }
         MemoryMap maps(builder.build());
@@ -354,6 +402,19 @@ public:
                     if (!config["spells"].isNull()) hero->removeAllSpells();
                     for (const auto & spell : config["spells"].isNull() ? std::vector<JsonNode>{} : config["spells"].Vector()) hero->addSpellToSpellbook(SpellID(spell.Integer()));
                     if (!config["spells"].isNull() && !hero->getArt(ArtifactPosition::SPELLBOOK)) hero->putArtifact(ArtifactPosition::SPELLBOOK, game->createArtifact(ArtifactID::SPELLBOOK));
+                    if (!config["artifacts"].isNull()) {
+                        // Preserve native starting spellbook/machines unless a slot is overridden.
+                        for (const auto & entry : config["artifacts"].Vector()) {
+                            const auto slot = ArtifactPosition(entry["slot"].Integer());
+                            const auto id = ArtifactID(entry["artifact"].Integer());
+                            if (hero->getSlot(slot) && hero->getSlot(slot)->locked) throw std::runtime_error("Artifact slot is reserved by a combination");
+                            if (hero->getArt(slot)) hero->removeArtifact(slot);
+                            if (id.getNum() == -1) continue;
+                            auto * artifact = game->createArtifact(id, entry["spell"].isNull() ? SpellID::NONE : SpellID(entry["spell"].Integer()));
+                            if (!artifact->canBePutAt(hero, slot)) throw std::runtime_error("Artifact or combination does not fit the available slots");
+                            hero->putArtifact(slot, artifact);
+                        }
+                    }
                     hero->mana = config["mana"].isNull() ? hero->manaLimit() : config["mana"].Integer();
                     if (hero->mana > hero->manaLimit()) throw std::runtime_error("Mana exceeds native hero limit");
                 }
@@ -388,12 +449,13 @@ public:
         {
             const auto & sideStacks = armies.Vector().at(static_cast<int>(unit->unitSide())).Vector();
             const auto entry = std::find_if(sideStacks.begin(), sideStacks.end(), [&](const JsonNode & stack) { return stack["slot"].Integer() == unit->unitSlot().getNum(); });
-            if (entry == sideStacks.end()) throw std::runtime_error("Missing army slot");
-            const auto & specified = (*entry)["hex"];
+            const bool machine = unit->unitSlot() == SlotID::WAR_MACHINES_SLOT;
+            if (!machine && entry == sideStacks.end()) throw std::runtime_error("Missing army slot");
+            const auto & specified = machine ? JsonNode{} : (*entry)["hex"];
             if (!specified.isNull() && unit->initialPosition.toInt() != specified.Integer())
                 throw std::runtime_error("Occupied or invalid deployment footprint");
             for (const auto & hex : battle::Unit::getHexes(unit->initialPosition, unit->unitType()->isDoubleWide(), unit->unitSide()))
-                if (!hex.isAvailable() || !occupied.insert(hex.toInt()).second) throw std::runtime_error("Occupied or invalid deployment footprint");
+                if (!(machine ? hex.isValid() : hex.isAvailable()) || !occupied.insert(hex.toInt()).second) throw std::runtime_error("Occupied or invalid deployment footprint");
         }
         handler->sendAndApply(begin);
         auto & battle = *game->currentBattles.front();
@@ -408,7 +470,7 @@ public:
         JsonNode result = server.currentState();
         result["revision"].Integer() = revision;
         auto & legal = result["legal"];
-        legal["moves"].Vector(); legal["shots"].Vector(); legal["melee"].Vector();
+        legal["moves"].Vector(); legal["shots"].Vector(); legal["melee"].Vector(); legal["heals"].Vector();
         legal["wait"].Bool() = false; legal["defend"].Bool() = false;
         result["queue"].Vector();
         if (game->currentBattles.empty() || !result["winner"].isNull()) return result;
@@ -430,8 +492,9 @@ public:
         }
         for (const auto * target : battle.battleGetAllStacks())
         {
-            if (!target->alive() || !battle.battleCanAttackUnit(actor, target)) continue;
+            if (!target->alive()) continue;
             if (battle.battleCanShoot(actor, target->getPosition())) legal["shots"].Vector().emplace_back(target->unitId());
+            if (!battle.battleCanAttackUnit(actor, target)) continue;
             std::set<int> fromHexes;
             for (const auto & targetHex : target->getHexes())
                 for (const auto direction : BattleHex::hexagonalDirections())
@@ -442,6 +505,10 @@ public:
                     JsonNode attack; attack["target"].Integer() = target->unitId(); attack["from"].Integer() = from.toInt();
                     legal["melee"].Vector().push_back(std::move(attack));
                 }
+        }
+        if (actor->hasBonusOfType(BonusType::HEALER)) {
+            for (const auto * target : battle.battleGetAllStacks())
+                if (battle.battleGetOwner(target) == battle.battleGetOwner(actor) && target->canBeHealed()) legal["heals"].Vector().emplace_back(target->unitId());
         }
         return result;
     }
@@ -514,7 +581,9 @@ public:
                 theirs ? static_cast<float>(ours) / theirs : 1.0f, 2);
             const auto * stack = battle.battleGetStackByID(actor->unitId());
             if (!stack) throw std::runtime_error("Missing AI stack");
-            native = evaluator.selectStackAction(stack);
+            if (stack->hasBonusOfType(BonusType::HEALER) && stack->hasBonusOfType(BonusType::SIEGE_WEAPON)) {
+                CBattleAI machineAI; machineAI.initBattleInterface(environment, callback); native = machineAI.useHealingTent(BattleID(0), stack);
+            } else native = evaluator.selectStackAction(stack);
             if (evaluator.canCastSpell() && evaluator.attemptCastingSpell(stack))
             {
                 if (!callback->spellAction) throw std::runtime_error("AI did not return its spell choice");
@@ -551,6 +620,13 @@ public:
         }
         else if (action == "wait" && current["legal"]["wait"].Bool()) native = BattleAction::makeWait(actor);
         else if (action == "defend") native = BattleAction::makeDefend(actor);
+        else if (action == "heal") {
+            const int target = integer(request["target"], 0, INT32_MAX);
+            bool legal = false;
+            for (const auto & id : current["legal"]["heals"].Vector()) if (id.Integer() == target) legal = true;
+            if (!legal) throw std::runtime_error("Illegal healing target");
+            native = BattleAction::makeHeal(actor, battle.battleGetStackByID(target));
+        }
         else if (action == "move")
         {
             const int hex = integer(request["hex"], 0, 186);

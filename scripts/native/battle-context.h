@@ -8,6 +8,7 @@
 #include "lib/spells/CSpellHandler.h"
 #include "lib/spells/CSpell.h"
 #include "lib/CStack.h"
+#include "lib/entities/artifact/CArtifact.h"
 #include "lib/TerrainHandler.h"
 #include "lib/BattleFieldHandler.h"
 #include "lib/StartInfo.h"
@@ -107,6 +108,19 @@ JsonNode snapshot(const CGameState & state)
             heroState["label"].String() = hero->getHeroType()->getNameTranslated();
             heroState["level"].Integer() = hero->level;
             heroState["experience"].Integer() = hero->exp;
+            heroState["base"]["attack"].Integer() = hero->valOfBonuses(Selector::typeSubtype(BonusType::PRIMARY_SKILL, BonusSubtypeID(PrimarySkill::ATTACK)).And(Selector::sourceType()(BonusSource::HERO_BASE_SKILL)));
+            heroState["base"]["defense"].Integer() = hero->valOfBonuses(Selector::typeSubtype(BonusType::PRIMARY_SKILL, BonusSubtypeID(PrimarySkill::DEFENSE)).And(Selector::sourceType()(BonusSource::HERO_BASE_SKILL)));
+            heroState["base"]["power"].Integer() = hero->valOfBonuses(Selector::typeSubtype(BonusType::PRIMARY_SKILL, BonusSubtypeID(PrimarySkill::SPELL_POWER)).And(Selector::sourceType()(BonusSource::HERO_BASE_SKILL)));
+            heroState["base"]["knowledge"].Integer() = hero->valOfBonuses(Selector::typeSubtype(BonusType::PRIMARY_SKILL, BonusSubtypeID(PrimarySkill::KNOWLEDGE)).And(Selector::sourceType()(BonusSource::HERO_BASE_SKILL)));
+            heroState["artifacts"].Vector();
+            for (const auto & [slot, info] : hero->artifactsWorn) {
+                if (!info.getArt()) continue;
+                const auto * art = info.getArt(); JsonNode entry;
+                entry["slot"].Integer() = slot.getNum(); entry["artifact"].Integer() = art->getTypeId().getNum(); entry["locked"].Bool() = info.locked;
+                entry["label"].String() = art->getType()->getNameTranslated();
+                if (art->isScroll()) entry["spell"].Integer() = art->getScrollSpellID().getNum();
+                heroState["artifacts"].Vector().push_back(std::move(entry));
+            }
             heroState["skills"].Vector();
             for (const auto & [id, level] : hero->secSkills) {
                 if (id.getNum() < 0 || id.getNum() >= 28 || !level) continue;
@@ -228,6 +242,14 @@ public:
         }
         game->apply(pack);
         event["after"] = currentState();
+        if (event["type"].String() == "nativeUpdate") {
+            for (const auto & after : event["after"]["units"].Vector())
+                for (const auto & before : event["before"]["units"].Vector()) {
+                    if (before["id"] != after["id"] || before["maxHealth"] != after["maxHealth"] || after["health"].Integer() <= before["health"].Integer()) continue;
+                    event["type"].String() = "heal"; JsonNode restored; restored["id"] = after["id"];
+                    restored["healed"].Integer() = after["health"].Integer() - before["health"].Integer(); event["restored"].Vector().push_back(std::move(restored));
+                }
+        }
         if (!game->currentBattles.empty()) lastState = event["after"];
         events.push_back(std::move(event));
     }

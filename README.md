@@ -13,15 +13,17 @@ npm ci
 npm run dev -- --port 5174
 ```
 
-Open the localhost URL. Drag to orbit, scroll to zoom, and right-drag to pan. Select a unit from the menu, or click a friendly unit. With a configured native backend, configure both armies, click **开始对战**, then command the active stack. Movement is limited by creature speed; clicking an enemy approaches and resolves melee, retaliation and applicable extra attacks. Unblocked shooters with ammunition fire from their current position; **射手强制近战** overrides this. **等待** delays a stack, **防御** ends its turn with a defense bonus. Hover a model or occupied army slot to inspect engine attributes. Before battle the card uses native creature definitions; during battle it uses current stack attack, defense, damage, speed, HP and ammunition. **蓝方 VCMI AI** and **红方 VCMI AI** independently enable automatic turns, while **VCMI AI 行动一次** requests one action. The native bridge calls VCMI’s compiled `BattleEvaluator::selectStackAction` with two simulation turns and executes its result through the same server action processor. With a configured hero, the same compiled evaluator can choose a hero spell before the stack acts. Retreat and surrender decisions remain pending. Reset returns to army configuration. The close-up view and animation buttons inspect the original 3D asset.
+Open the localhost URL. Use WASD to move the viewpoint along the ground relative to the current camera heading. Drag to orbit, scroll to zoom, and right-drag to pan. Text fields ignore camera shortcuts; releasing a key or leaving the window stops movement. Select a unit from the menu, or click a friendly unit. With a configured native backend, configure both armies, click **开始对战**, then command the active stack. Movement is limited by creature speed; clicking an enemy approaches and resolves melee, retaliation and applicable extra attacks. Unblocked shooters with ammunition fire from their current position; **射手强制近战** overrides this. **等待** delays a stack, **防御** ends its turn with a defense bonus. Hover a model or occupied army slot to inspect engine attributes. Before battle the card uses native creature definitions; during battle it uses current stack attack, defense, damage, speed, HP and ammunition. **蓝方 VCMI AI** and **红方 VCMI AI** independently enable automatic turns, while **VCMI AI 行动一次** requests one action. The native bridge calls VCMI’s compiled `BattleEvaluator::selectStackAction` with two simulation turns and executes its result through the same server action processor. With a configured hero, the same compiled evaluator can choose a hero spell before the stack acts. Retreat and surrender decisions remain pending. Reset returns to army configuration. The close-up view and animation buttons inspect the original 3D asset.
 
 Local models load in the background. Army edits, production presets and reset take effect immediately with procedural models; loading or failed artwork does not block combat configuration. Exact duplicate binary payloads and texture sources are shared when exporting alternate skeleton scenes.
 
-The local scene can reuse the existing HD battlefield plates. The public fallback uses procedural terrain, trees, rocks and grass.
+The scene supports private 3D environments through the local manifest: a tileable ground material plus placed GLB scenery. Terrain remains flat beneath the native hex grid and rises into surrounding hills; imported trees, rocks and slopes rotate with the battlefield. These assets are loaded separately from creatures, and failure keeps the procedural public scene. Original 2D backgrounds remain available as world-space boards. Realistic reconstruction of the full background set is in progress; primitive geometric theme sketches were rejected and removed.
+
+Native footprints determine the visible one- or two-hex bases. Models stand at the footprint centre while the native leading hex remains the movement anchor. Imported humanoids use the active skeleton crown for body scale, so long weapons do not shrink their wielders. Mounted creatures, angels and dragons have separate presentation sizes. Cavalier/Champion exports facing -X are normalized to the renderer’s +Z forward direction; an asset can declare `forward` as `+z`, `-z`, `+x` or `-x`. These sizes are visual calibration, not claims about original H3 physical dimensions.
 
 ## Heroes and combat magic
 
-**英雄与魔法** configures an optional custom hero for each side: attack, defense, spell power, knowledge, up to eight distinct original secondary skills at basic/advanced/expert level, and explicitly learned spells. Heroes have no specialty or combat artifacts. Mana capacity, army bonuses, skill effects and spell school mastery come from VCMI. Hero settings survive battle reset and are locked during combat.
+**英雄与魔法** configures an optional custom hero for each side: attack, defense, spell power, knowledge, up to eight distinct original secondary skills at basic/advanced/expert level, and explicitly learned spells. Anonymous custom heroes have no specialty; original named heroes retain their native specialty. The equipment editor equips original artifacts and war machines. Mana capacity, army bonuses, skill effects and spell school mastery come from VCMI. Hero settings survive battle reset and are locked during combat.
 
 Open **战斗魔法** during battle to choose a learned spell and an engine-approved target, then click **施放魔法**. Single targets can also be selected on the canvas; spells with two destinations, such as Teleport, use the ordered target list. The engine supplies the catalogue of 60 original combat spells, current availability, mana cost and all legal target combinations. It enforces immunity, school effects, mana, target validity and one hero cast per round. A hero spell normally leaves the same stack active. Earthquake remains unavailable in the current non-siege fixture; complete verification of every spell is pending.
 
@@ -73,6 +75,8 @@ For mixed source directories, `--config /private/export.json` accepts `{"units":
 
 Each source folder contains `holding.blend`, `moving.blend`, `attack_front.blend`, `hitted.blend`, and `death.blend`. The exporter bakes scene animations, matches animation targets by full hierarchy path, and packs clips into one GLB per creature; explicit `scenes` mappings may include `shoot` or other extra clips, and directory mode detects `shoot_front.blend` so geometry and textures are not downloaded five times. This assumes clips share a compatible rig hierarchy. Rig-local bone names may repeat; the packer maps full hierarchy paths. `geometryClip` can select a clip containing all weapon meshes (e.g. `attack`), and optional meshes missing from a clip receive an explicit hidden scale track. A target absent from the geometry scene fails validation; incompatible scene roots still need a separate normalization step. Materials need inspection after export; Blender-specific shader nodes do not all translate to glTF.
 
+Procedural base colours (for example Noise/Color Ramp graphs) must be baked before export; glTF cannot preserve arbitrary Blender shader graphs. `scripts/bake-blender-materials.py` reads the same private export configuration and writes copied scenes, packed colour textures and a new `export-config.json` into a fresh private staging directory. It bakes albedo as emission without lighting, preserving existing UVs, and processes each action independently because their topology may differ. Export the resulting configuration with `scripts/export-blender.py`. This step handles base colour only; unsupported roughness/normal graphs and flat source materials still require separate material work. Original source files are never overwritten.
+
 `public/local-assets/`, `.local/`, build output and art formats are ignored. **A local production build includes whatever is in `public/`; do not distribute that build with private artwork.** The public CI checkout contains only code and therefore builds the procedural scene.
 
 ## Boundaries
@@ -98,7 +102,7 @@ The **战斗场景** controls change native terrain, battlefield and initial obs
 
 Engine integration lives in this repository under `scripts/native/`. Upstream VCMI sources remain unchanged: the local bootstrap substitutes the repository-owned profile-directory implementation in a new output directory, and fixture helper changes are applied to private copies. Future rule adaptations should use VCMI mods/plugins where supported; unavoidable source changes must be tracked here as reviewable patches with reproducible build steps rather than an untracked dirty fork.
 
-The active `base-reference` profile permits only `core` and `vcmi`, excluding installed rule mods and user settings. **Original H3 base behavior remains the target, not a certified result.** Known differences such as regeneration timing still need original-game checks and engine-side handling. Combat artifacts, new custom mechanisms/factions, siege, full spell/creature verification, richer event animation and WASM are pending. The native interface supports the eight original land terrains, their ordinary battlefields, special ground, optional native initial obstacles and named or custom fighting heroes. Sand without initial obstacles remains the default. Spell-created obstacles are also engine-managed.
+The active `base-reference` profile permits only `core` and `vcmi`, excluding installed rule mods and user settings. **Original H3 base behavior remains the target, not a certified result.** Known differences such as regeneration timing still need original-game checks and engine-side handling. New custom mechanisms/factions, siege, initial Tactics positioning, full spell/creature/artifact verification, richer event animation and WASM are pending. The native interface supports the eight original land terrains, their ordinary battlefields, special ground, optional native initial obstacles and named or custom fighting heroes. Sand without initial obstacles remains the default. Spell-created obstacles are also engine-managed.
 
 | Module | Responsibility |
 | --- | --- |
@@ -148,4 +152,35 @@ The optional local manifest also accepts `backgrounds: [{ "label": "Grass hills"
 HD background mode supports mouse-wheel and +/− button zoom from 1× to 3×. The camera projection and image UV crop scale together about the viewport center, keeping feet, shadows and painted ground aligned. Overview resets the crop. This is magnification of existing detail, not additional image resolution.
 
 
-The hero editor now offers the 32 original Castle/Necropolis heroes and their engine descriptions. Selecting a hero and level uses VCMI's starting attributes, skills, learned spells, native experience table and automatic level-up choices. Previews display the actual rolled configuration; creation with identical inputs reproduces it. **自定义属性、技能与魔法** enables explicit overrides while retaining that hero's native specialty. Choosing **自定义英雄** instead removes specialties and keeps the previous sandbox configuration. Battle artifacts and adventure-only outcomes such as Estates/Navigation/after-battle Necromancy are not yet connected. Hero progression is generated for the standalone battle fixture, not played through an adventure campaign.
+The hero editor now offers the 32 original Castle/Necropolis heroes and their engine descriptions. Selecting a hero and level uses VCMI's starting attributes, skills, learned spells, native experience table and automatic level-up choices. Previews display the actual rolled configuration; creation with identical inputs reproduces it. **自定义属性、技能与魔法** enables explicit overrides while retaining that hero's native specialty. Choosing **自定义英雄** instead removes specialties and keeps the previous sandbox configuration. Battle equipment is connected; adventure-only outcomes such as Estates/Navigation/after-battle Necromancy remain unconnected. Hero progression is generated for the standalone battle fixture, not played through an adventure campaign.
+
+## Equipment and war machines
+
+Open **战斗装备与战争机器** in a hero editor. Select an item for a native equipment slot, preserve the starting item, or explicitly remove it. VCMI checks allowed slots and combination locks, applies artifact bonuses before computing mana capacity, and grants scroll/combination spells. The attributes editor shows base values; preview totals include equipment bonuses. Equipment survives reset. Named heroes retain native starting machines unless removed explicitly.
+
+Ballista, Ammo Cart and First Aid Tent occupy their native extra positions, outside the seven editable army slots. They use procedural machine models. Ballista shooting and repeated attacks, ammunition preservation and healing are processed by VCMI. When a controlled tent acts, choose an engine-approved wounded friendly target and click **急救帐篷治疗**; AI healing uses upstream `CBattleAI::useHealingTent`. The native build therefore also links the existing Ninja BattleAI and TacticsHandler objects; its compatible upstream build must have BattleAI enabled. Upstream source remains untouched.
+
+Native checks exercise primary bonuses/mana, combination locks, scroll summoning, Titan's Thunder's granted spell, ammunition carts, controlled ballista double shots and manual/AI tent healing. The equipment catalogue also contains adventure artifacts; cataloguing them does not implement adventure effects or certify all original artifact rules. Siege/catapult actions are still unavailable.
+
+A private environment entry in `manifest.json` has the following structure. Ground maps cover the terrain with `groundRepeat` repeats; each GLB is normalized once to `height` world units, then placed with its own position/yaw/uniform scale. Keep the playing surface clear: visual scenery does not create combat obstacles.
+
+```json
+{
+  "environments": {
+    "grass-hills": {
+      "label": "草地山丘",
+      "ground": "/local-assets/ground-albedo.jpg",
+      "normal": "/local-assets/ground-normal.jpg",
+      "roughness": "/local-assets/ground-roughness.jpg",
+      "groundRepeat": 16,
+      "pieces": [{
+        "url": "/local-assets/pine.glb",
+        "height": 9,
+        "instances": [{"position": [28, 4, -22], "yaw": 1.2, "scale": 0.9}]
+      }]
+    }
+  }
+}
+```
+
+The local first grass scene uses Poly Haven pine/rock assets and scanned ground maps after a rejected Meshy scenery attempt. Asset provenance and exports remain local. This first scene is a draft; it does not establish that all 14 original background themes have been reconstructed or that their appearance has been accepted. GLB exports include a content hash in their URL, and manifest requests bypass the browser cache so updated local art can replace older exports on reload.

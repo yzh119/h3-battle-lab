@@ -445,5 +445,107 @@ class NativeBackendTests(unittest.TestCase):
             self.assertEqual(self.request('state')['result']['state'], state)
 
 
+    def test_equipment_catalogue_native_primary_bonuses_and_mana(self):
+        catalogue = self.request('catalogue')['result']['equipment']
+        self.assertEqual([slot['id'] for slot in catalogue['slots']], [*range(16), 17, 18])
+        self.assertEqual(len(catalogue['artifacts']), 139)
+        self.assertNotIn(2, [art['id'] for art in catalogue['artifacts']])
+        armies = [[{'creature': 3, 'count': 20}], [{'creature': 58, 'count': 100}]]
+        hero = {**self.hero([15]), 'artifacts': [{'slot': 3, 'artifact': 7}, {'slot': 0, 'artifact': 19}]}
+        state = self.request('create', seed=1337, armies=armies, heroes=[hero, None])['result']['state']
+        native = state['heroes'][0]
+        self.assertEqual(native['base'], {'attack': 2, 'defense': 2, 'power': 3, 'knowledge': 10})
+        self.assertEqual((native['attack'], native['knowledge'], native['mana'], native['maxMana']), (4, 11, 110, 110))
+        marksman = next(u for u in state['units'] if u['side'] == 0)
+        self.assertEqual(marksman['attack'], 10)
+        self.assertEqual(self.request('deployment', seed=1337, armies=armies, heroes=[hero, None])['result']['state']['heroes'], state['heroes'])
+        self.assertEqual(self.request('state')['result']['state'], state)
+
+    def test_native_combination_reserves_slots_and_invalid_equipment_is_atomic(self):
+        armies = [[{'creature': 3, 'count': 20}], [{'creature': 58, 'count': 100}]]
+        hero = {**self.hero([]), 'artifacts': [{'slot': 3, 'artifact': 129}]}
+        state = self.request('create', seed=1337, armies=armies, heroes=[hero, None])['result']['state']
+        native = state['heroes'][0]
+        self.assertEqual(native['attack'], native['base']['attack'] + 21)
+        self.assertEqual(native['maxMana'], 310)
+        self.assertEqual({a['slot'] for a in native['artifacts'] if a['locked']}, {0, 2, 4, 5, 8})
+        for items in [[{'slot': 3, 'artifact': 129}, {'slot': 0, 'artifact': 19}], [{'slot': 0, 'artifact': 7}], [{'slot': 3, 'artifact': 7}, {'slot': 3, 'artifact': 7}], [{'slot': 16, 'artifact': 3}], [{'slot': 9, 'artifact': 1}], [{'slot': 9, 'artifact': 1, 'spell': 0}], [{'slot': 3, 'artifact': 7, 'spell': 15}], [{'slot': 9, 'artifact': 2}]]:
+            self.assertFalse(self.request('create', seed=1337, armies=armies, heroes=[{**hero, 'artifacts': items}, None])['ok'], items)
+            self.assertEqual(self.request('state')['result']['state'], state)
+
+    def test_scroll_and_titans_thunder_grant_native_spells_and_cast(self):
+        armies = [[{'creature': 3, 'count': 20}], [{'creature': 58, 'count': 200}]]
+        hero = {**self.hero([]), 'artifacts': [{'slot': 9, 'artifact': 1, 'spell': 68}]}
+        state = self.request('create', seed=1337, armies=armies, heroes=[hero, None])['result']['state']
+        self.assertEqual([spell['id'] for spell in state['heroes'][0]['spells']], [68])
+        summoned = self.act(state, 'spell', spell=68, targets=self.spell_targets(state, 68)[0])['state']
+        self.assertTrue(any(u['creature'] == 'core:waterElemental' and u['count'] == 6 for u in summoned['units']))
+        hero['artifacts'] = [{'slot': 3, 'artifact': 135}]
+        state = self.request('create', seed=1337, armies=armies, heroes=[hero, None])['result']['state']
+        spell = next(spell for spell in state['heroes'][0]['spells'] if spell['id'] == 57)
+        self.assertEqual(spell['cost'], 0)
+        enemy = next(u for u in state['units'] if u['side'] == 1)
+        after = self.act(state, 'spell', spell=57, targets=[{'unit': enemy['id']}])['state']
+        self.assertEqual(next(u for u in after['units'] if u['id'] == enemy['id'])['health'], enemy['health'] - 600)
+        self.assertEqual(after['heroes'][0]['mana'], state['heroes'][0]['mana'])
+
+    def test_ammo_cart_keeps_native_arrows_and_is_not_an_army_slot(self):
+        armies = [[{'creature': 3, 'count': 20}], [{'creature': 58, 'count': 100}]]
+        hero = {**self.hero([]), 'artifacts': [{'slot': 14, 'artifact': 5}]}
+        state = self.request('create', seed=1337, armies=armies, heroes=[hero, None])['result']['state']
+        cart = next(u for u in state['units'] if u['creature'] == 'core:ammoCart')
+        self.assertLess(cart['slot'], 0)
+        self.assertNotIn(cart['id'], state['queue'])
+        target = next(u for u in state['units'] if u['side'] == 1)
+        after = self.act(state, 'shoot', target=target['id'])
+        self.assertEqual(len([e for e in after['events'] if e['type'] == 'attack']), 2)
+        shooter = next(u for u in after['state']['units'] if u['creature'] == 'core:marksman')
+        self.assertEqual(shooter['shots'], 24)
+
+    def test_ballista_manual_double_shot_and_native_starting_machines(self):
+        armies = [[{'creature': 58, 'count': 100}], [{'creature': 58, 'count': 100}]]
+        hero = {'attack': 0, 'defense': 0, 'power': 0, 'knowledge': 1, 'skills': [{'id': 20, 'level': 3}], 'spells': [], 'artifacts': [{'slot': 13, 'artifact': 4}]}
+        state = self.request('create', seed=1337, armies=armies, heroes=[hero, None])['result']['state']
+        for _ in range(10):
+            actor = next(u for u in state['units'] if u['id'] == state['activeStack'])
+            if actor['creature'] == 'core:ballista': break
+            state = self.act(state, 'defend')['state']
+        self.assertEqual(actor['creature'], 'core:ballista')
+        target = next(u for u in state['units'] if u['side'] == 1)
+        self.assertIn(target['id'], state['legal']['shots'])
+        result = self.act(state, 'shoot', target=target['id'])
+        self.assertEqual(len([e for e in result['events'] if e['type'] == 'attack' and e['attacker'] == actor['id']]), 2)
+        for hero_type, key, slot in [(6, 'core:ballista', 13), (8, 'core:firstAidTent', 15)]:
+            config = {'type': hero_type, 'level': 1}
+            preview = self.request('deployment', seed=1337, armies=armies, heroes=[config, None])['result']['state']
+            self.assertTrue(any(u['creature'] == key for u in preview['units']))
+            config['artifacts'] = [{'slot': slot, 'artifact': -1}]
+            removed = self.request('deployment', seed=1337, armies=armies, heroes=[config, None])['result']['state']
+            self.assertFalse(any(u['creature'] == key for u in removed['units']))
+
+    def test_first_aid_native_manual_healing_ai_and_rejected_targets(self):
+        armies = [[{'creature': 13, 'count': 5, 'hex': 90}], [{'creature': 3, 'count': 20, 'hex': 96}]]
+        hero = {'attack': 0, 'defense': 0, 'power': 0, 'knowledge': 1, 'skills': [{'id': 27, 'level': 3}], 'spells': [], 'artifacts': [{'slot': 15, 'artifact': 6}]}
+        for action in ['heal', 'ai']:
+            state = self.request('create', seed=1337, armies=armies, heroes=[hero, None])['result']['state']
+            angel = next(u for u in state['units'] if u['side'] == 0 and u['slot'] == 0)
+            self.assertFalse(self.request('act', revision=state['revision'], stack=state['activeStack'], action='heal', target=angel['id'])['ok'])
+            state = self.act(state, 'defend')['state']
+            state = self.act(state, 'shoot', target=angel['id'])['state']
+            actor = next(u for u in state['units'] if u['id'] == state['activeStack'])
+            self.assertEqual(actor['creature'], 'core:firstAidTent')
+            self.assertEqual(state['legal']['heals'], [angel['id']])
+            foe = next(u for u in state['units'] if u['side'] == 1)
+            self.assertFalse(self.request('act', revision=state['revision'], stack=state['activeStack'], action='heal', target=foe['id'])['ok'])
+            self.assertEqual(self.request('state')['result']['state'], state)
+            hurt = next(u for u in state['units'] if u['id'] == angel['id'])
+            self.assertLess(hurt['topHealth'], hurt['maxHealth'])
+            result = self.act(state, action, **({'target': angel['id']} if action == 'heal' else {}))
+            restored = next(u for u in result['state']['units'] if u['id'] == angel['id'])
+            self.assertEqual(restored['count'], hurt['count'])
+            self.assertEqual(restored['health'], restored['maxHealth'] * restored['count'])
+            self.assertTrue(any(e['type'] == 'heal' for e in result['events']))
+
+
 if __name__ == "__main__":
     unittest.main()
