@@ -95,12 +95,12 @@ Each line is one JSON request `{ "version": 1, "requestId": "unique-id", "op": "
 | Operation | Fields and response |
 | --- | --- |
 | `catalogue` | Original creature IDs/data, `backend`, `rulesProfile`, `customPacks: false`, `heroSpells: false` |
-| `create` | `seed` (0–2³¹−1), `armies` (two arrays of 1–7 `{creature,count,hex?}`); native initial state/events |
+| `create` | `seed` (0–2³¹−1), `armies` (two arrays of 1–7 `{creature,count,slot?,hex?}`); native initial state/events |
 | `state` | Current authoritative state |
 | `act` | `revision`, active `stack`, `action`: `wait`, `defend`, `move` (+`hex`), `shoot` (+`target`), `melee` (+`target`,`from`) |
 | `dispose` | Releases the battle; the process can create another |
 
-Original IDs are 0–13 and 56–69. Counts are 1–99,999. Deployment hexes are optional; the engine supplies default formation and double-wide adjustments. State contains native units/footprints, counts/health/ammo, round, winner, queue and legal actions with native paths. Actions return ordered messages containing before/after state, followed by final state with the next revision. The wrapper validates actions against native legal options before mutating state. Failed creation preserves the prior battle.
+Original IDs are 0–13 and 56–69. Counts are 1–99,999. Optional `slot` is 0–6; absent slots default to input array index. Duplicate slot IDs are rejected. Sparse slots and out-of-order input are accepted, with native slot IDs preserved. Deployment hexes are optional; the engine supplies default formation and double-wide adjustments. State contains native units/footprints, counts/health/ammo, round, winner, queue and legal actions with native paths. Actions return ordered messages containing before/after state, followed by final state with the next revision. The wrapper validates actions against native legal options before mutating state. Failed creation preserves the prior battle.
 
 The local HTTP envelope is `{session?,request}` at `/api/engine`, with `{session,response}` returned. A first `catalogue` without a session creates a process. Each browser session owns a private writable profile; its data directory points at the prepared resources. No combat code runs in the HTTP bridge. Do not expose this development process launcher as a public service.
 

@@ -103,6 +103,16 @@ class NativeBackendTests(unittest.TestCase):
         self.assertFalse(self.request("create", seed=1, armies=[[{"creature": 10, "count": 1, "hex": 86}], [{"creature": 58, "count": 1, "hex": 96}]])["ok"])
         self.assertEqual(self.request("state")["result"]["state"], state)
 
+    def test_sparse_slots_remain_stable_and_duplicate_slots_are_rejected(self):
+        state = self.create([{"creature": 3, "count": 73, "slot": 6, "hex": 90}, {"creature": 0, "count": 12, "slot": 2}], [{"creature": 58, "count": 20, "slot": 4, "hex": 96}])
+        self.assertEqual(sorted((u["side"], u["slot"]) for u in state["units"]), [(0, 2), (0, 6), (1, 4)])
+        marksman = next(u for u in state["units"] if u["creature"] == "core:marksman")
+        self.assertEqual(marksman["hex"], 90)
+        self.assertEqual(marksman["count"], 73)
+        duplicate = self.request("create", seed=1, armies=[[{"creature": 0, "count": 1, "slot": 6}, {"creature": 3, "count": 1, "slot": 6}], [{"creature": 58, "count": 1}]])
+        self.assertFalse(duplicate["ok"])
+        self.assertEqual(self.request("state")["result"]["state"], state)
+
     def test_lethal_native_attack_finishes_and_new_battle_resets(self):
         state = self.create([{"creature": 3, "count": 100, "hex": 90}], [{"creature": 58, "count": 1, "hex": 96}])
         result = self.act(state, "shoot", target=state["legal"]["shots"][0])

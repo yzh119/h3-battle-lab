@@ -17,7 +17,7 @@ export interface EngineEvent {
 }
 export interface NativeCreature { id: number; key: string; label: string; health: number; speed: number; doubleWide: boolean }
 export interface EngineResult { state: EngineState; events: EngineEvent[] }
-export interface ArmyStack { creature: number; count: number; hex?: number }
+export interface ArmyStack { creature: number; count: number; slot?: number; hex?: number }
 export class EngineClient {
   private session?: string;
   async request<T>(op: string, data: Record<string, unknown> = {}): Promise<T> {

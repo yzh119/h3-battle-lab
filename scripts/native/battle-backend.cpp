@@ -56,20 +56,27 @@ public:
     {
         fields(request, {"version", "requestId", "op", "seed", "armies"});
         const auto seed = integer(request["seed"], 0, 2147483647);
-        const auto & armies = request["armies"];
+        JsonNode armies = request["armies"];
         if (!armies.isVector() || armies.Vector().size() != 2) throw std::runtime_error("Two armies required");
-        for (const auto & army : armies.Vector())
+        for (auto & army : armies.Vector())
         {
             if (!army.isVector() || army.Vector().empty() || army.Vector().size() > 7) throw std::runtime_error("Each army requires 1..7 stacks");
-            for (const auto & stack : army.Vector())
+            std::set<int> slots;
+            int index = 0;
+            for (auto & stack : army.Vector())
             {
-                fields(stack, {"creature", "count", "hex"});
+                fields(stack, {"creature", "count", "hex", "slot"});
+                const int slot = stack["slot"].isNull() ? index : integer(stack["slot"], 0, 6);
+                if (!slots.insert(slot).second) throw std::runtime_error("Duplicate army slot");
+                stack["slot"].Integer() = slot;
+                ++index;
                 const int id = integer(stack["creature"], 0, 69);
                 if (!allowedCreature(id)) throw std::runtime_error("Only original Castle/Necropolis creatures supported");
                 integer(stack["count"], 1, 99999);
                 if (!stack["hex"].isNull() && !BattleHex(integer(stack["hex"], 0, 186)).isAvailable())
                     throw std::runtime_error("Unavailable deployment hex");
             }
+            std::sort(army.Vector().begin(), army.Vector().end(), [](const JsonNode & left, const JsonNode & right) { return left["slot"].Integer() < right["slot"].Integer(); });
         }
         TinyH3M::TinyH3MBuilder builder(EMapFormat::SOD);
         builder.size(36).name("BattleLab").playerActive(PlayerColor(0)).playerActive(PlayerColor(1))
@@ -97,7 +104,7 @@ public:
                 neutralize(*hero); hero->clearSlots();
                 const auto & stacks = armies.Vector().at(static_cast<int>(side)).Vector();
                 for (size_t slot = 0; slot < stacks.size(); ++slot)
-                    hero->setCreature(SlotID(slot), CreatureID(stacks[slot]["creature"].Integer()), stacks[slot]["count"].Integer());
+                    hero->setCreature(SlotID(stacks[slot]["slot"].Integer()), CreatureID(stacks[slot]["creature"].Integer()), stacks[slot]["count"].Integer());
                 armyObjects[side] = hero;
             }
         if (!armyObjects[BattleSide::ATTACKER] || !armyObjects[BattleSide::DEFENDER]) throw std::runtime_error("Missing army objects");
@@ -124,7 +131,10 @@ public:
         // must be honored exactly rather than silently relocated by getAvailableHex.
         for (const auto * unit : begin.info->battleGetAllStacks())
         {
-            const auto & specified = armies.Vector().at(static_cast<int>(unit->unitSide())).Vector().at(unit->unitSlot().getNum())["hex"];
+            const auto & sideStacks = armies.Vector().at(static_cast<int>(unit->unitSide())).Vector();
+            const auto entry = std::find_if(sideStacks.begin(), sideStacks.end(), [&](const JsonNode & stack) { return stack["slot"].Integer() == unit->unitSlot().getNum(); });
+            if (entry == sideStacks.end()) throw std::runtime_error("Missing army slot");
+            const auto & specified = (*entry)["hex"];
             if (!specified.isNull() && unit->initialPosition.toInt() != specified.Integer())
                 throw std::runtime_error("Occupied or invalid deployment footprint");
             for (const auto & hex : battle::Unit::getHexes(unit->initialPosition, unit->unitType()->isDoubleWide(), unit->unitSide()))

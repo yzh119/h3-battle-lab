@@ -1,6 +1,6 @@
 /** Coordinate conversion and visible model data only. Legal actions come from VCMI. */
 export interface Hex { q: number; r: number }
-export interface VisualUnit { id: string; label: string; kind: string; team: number; cell: Hex; hp: number; initialCount: number }
+export interface VisualUnit { id: string; label: string; kind: string; team: number; armySlot: number; cell: Hex; hp: number; initialCount: number }
 export const COLS = 17, ROWS = 11;
 export const key = (h: Hex) => `${h.q},${h.r}`;
 export const cellAt = (col: number, row: number): Hex => ({ q: col - Math.ceil(row / 2), r: row });

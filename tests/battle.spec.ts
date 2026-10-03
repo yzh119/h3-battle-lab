@@ -76,3 +76,43 @@ test('real VCMI browser connection plays two shots and applies native state at i
   expect((await snapshot(page)).state).toBeUndefined(); expect((await snapshot(page)).units[0].count).toBe(20);
   expect(errors).toEqual([]);
 });
+
+test('seven-slot army bars configure exact empty positions and retain gaps on reset', async ({ page }) => {
+  await missingArt(page); await open(page); await expect(page.locator('#assign-slot')).toBeEnabled();
+  await expect(page.locator('.army-slot')).toHaveCount(14);
+  const seventh = page.locator('.army-slot[data-team="0"][data-slot="6"]');
+  await seventh.click(); await expect(page.locator('#selected-slot-label')).toHaveText('蓝方 · 第 7 格');
+  await page.locator('#creature-picker').selectOption('marksman'); await page.locator('#stack-count').fill('73');
+  await page.locator('#assign-slot').click(); await expect(seventh).toHaveAttribute('aria-label', '蓝方第 7 格 神射手 ×73');
+  await page.locator('#remove-unit').click(); await expect(seventh).toHaveAttribute('aria-label', '蓝方第 7 格 空位');
+  await seventh.click(); await page.locator('#creature-picker').selectOption('marksman'); await page.locator('#stack-count').fill('73'); await page.locator('#assign-slot').click();
+  await expect(page.locator('#assign-slot')).toBeEnabled();
+  await page.locator('#reset').click(); await expect(page.locator('#assign-slot')).toBeEnabled();
+  const roster = (await snapshot(page)).units;
+  expect(roster.filter((u: any) => u.team === 0).map((u: any) => u.armySlot).sort()).toEqual([0, 6]);
+  if (process.env.BATTLE_LAB_BACKEND) {
+    await page.locator('#start-battle').click(); await expect(page.locator('#defend-turn')).toBeEnabled();
+    const state = (await snapshot(page)).state;
+    expect(state.units.find((u: any) => u.side === 0 && u.slot === 6).count).toBe(73);
+    expect(state.units.filter((u: any) => u.side === 0).map((u: any) => u.slot).sort()).toEqual([0, 6]);
+  }
+  await page.screenshot({ path: '.local/seven-slot-overview.png' });
+});
+
+test('overview and close-up share canvas bounds and restore the selected background', async ({ page }) => {
+  await missingArt(page);
+  await page.route('**/local-assets/manifest.json', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ units: {}, backgrounds: [{ label: '画布测试', url: '/test-backdrop.svg' }] }) }));
+  await page.route('**/test-backdrop.svg', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><rect width="1200" height="800" fill="#687850"/></svg>' }));
+  await open(page); expect((await snapshot(page)).backdrop).toBe(true);
+  const bounds = await page.locator('#battle').boundingBox();
+  await page.locator('#closeup').click(); expect((await snapshot(page)).backdrop).toBe(false);
+  expect(await page.locator('#battle').boundingBox()).toEqual(bounds);
+  await expect(page.locator('#closeup')).toHaveClass('active');
+  await page.locator('#overview').click(); expect((await snapshot(page)).backdrop).toBe(true);
+  expect(await page.locator('#battle').boundingBox()).toEqual(bounds);
+  await page.setViewportSize({ width: 1000, height: 760 });
+  await expect.poll(async () => (await page.locator('#battle').boundingBox())?.width).not.toBe(bounds?.width);
+  const resized = await page.locator('#battle').boundingBox();
+  await page.locator('#closeup').click(); expect(await page.locator('#battle').boundingBox()).toEqual(resized);
+  await page.locator('#overview').click(); expect(await page.locator('#battle').boundingBox()).toEqual(resized);
+});

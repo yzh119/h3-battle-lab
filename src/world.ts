@@ -95,10 +95,10 @@ export function createWorld(canvas: HTMLCanvasElement) {
   scenery.add(tufts);
   const shadowFloor = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), new THREE.ShadowMaterial({ opacity: .32 }));
   shadowFloor.rotation.x = -Math.PI / 2; shadowFloor.position.y = -.025; shadowFloor.receiveShadow = true; shadowFloor.visible = false; scene.add(shadowFloor);
-  let backdrop: THREE.Texture | undefined, plateMode = false, plateRequest = 0;
+  let backdrop: THREE.Texture | undefined, plateMode = false, selectedBackdrop = false, plateRequest = 0;
   const backgrounds = new Map<string, THREE.Texture>();
   function resize() {
-    if (plateMode && backdrop) {
+    if (selectedBackdrop && backdrop) {
       const image = backdrop.image as HTMLImageElement;
       const aspect = image.width / image.height;
       const left = window.innerWidth > 760 ? 300 : 0;
@@ -137,11 +137,12 @@ export function createWorld(canvas: HTMLCanvasElement) {
     let texture = backgrounds.get(url);
     if (!texture) { texture = await new THREE.TextureLoader().loadAsync(url); texture.colorSpace = THREE.SRGBColorSpace; backgrounds.set(url, texture); }
     if (request !== plateRequest) return;
-    backdrop = texture; applyMode(true); resetCamera();
+    backdrop = texture; selectedBackdrop = true; applyMode(true); resetCamera();
   }
-  function freeCamera() { plateRequest++; applyMode(false); }
-  function frameUnit(position: THREE.Vector3) { freeCamera(); controls.target.copy(position).add(new THREE.Vector3(0, 1.1, 0)); camera.position.copy(position).add(new THREE.Vector3(4.4, 3.5, 5.8)); controls.update(); }
+  function freeCamera() { plateRequest++; selectedBackdrop = false; applyMode(false); }
+  function frameUnit(position: THREE.Vector3) { plateRequest++; applyMode(false); controls.target.copy(position).add(new THREE.Vector3(0, 1.1, 0)); camera.position.copy(position).add(new THREE.Vector3(4.4, 3.5, 5.8)); controls.update(); }
   function resetCamera() {
+    applyMode(selectedBackdrop);
     camera.zoom = 1; if (backdrop) { backdrop.repeat.setScalar(1); backdrop.offset.setScalar(0); } camera.updateProjectionMatrix();
     if (plateMode) { camera.position.set(0, 26, 32); controls.target.set(0, 0, 0); camera.lookAt(controls.target); }
     else { camera.position.set(12, 26, 40); controls.target.set(0, .8, 0); controls.update(); }
