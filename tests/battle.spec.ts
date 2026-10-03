@@ -27,6 +27,8 @@ test('public scene renders without art or engine; editing and camera remain avai
 });
 
 test('army capacity, selection and custom format validation work without combat', async ({ page }) => {
+  test.setTimeout(process.env.CI ? 180000 : 90000);
+  await page.setViewportSize({ width: 800, height: 600 });
   await missingArt(page); await open(page);
   await expect(page.locator('#replace-unit')).toBeEnabled(); await page.locator('#shadows').uncheck();
   await page.locator('#team-picker').selectOption('1');

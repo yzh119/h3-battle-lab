@@ -20,6 +20,14 @@ def build(source, upstream_build, core, output, dependency_include, dependency_l
         if '#include "StdInc.h"' not in code:
             raise ValueError("Unexpected helper source layout")
         target = output / name
+        if backend and name == "TinyH3MBuilder.cpp":
+            # Keep the army containers' map terrain consistent with the sand
+            # battlefield. VCMI terrain limiters consult those map stacks too.
+            original = 'w.writeUInt8(2);    // terrain type = GRASS in H3M ordering'
+            if code.count(original) != 1:
+                raise ValueError("Unsupported upstream fixture terrain writer")
+            code = code.replace(original, 'w.writeUInt8(1);    // terrain type = SAND in H3M ordering')
+            code = code.replace('w.writeUInt8(0x31); // terView — plain-grass tile', 'w.writeUInt8(0); // terView — sand fixture tile')
         target.write_text(code.replace('#include "StdInc.h"', '#include "Global.h"'))
         copies.append(str(target))
     includes = [source, source / "include", source / "lib", source / "server", helpers, Path(dependency_include)]

@@ -89,9 +89,12 @@ class NativeBackendTests(unittest.TestCase):
         self.assertEqual([e["counter"] for e in attacks], [False, True, False])
 
     def test_all_creatures_full_armies_and_double_wide_deployment(self):
+        catalogue = {c["key"]: c for c in self.request("catalogue")["result"]["creatures"]}
         for creature in [*range(14), *range(56, 70)]:
             state = self.create([{"creature": creature, "count": 99999}], [{"creature": 58, "count": 99999}])
             self.assertEqual(len(state["units"]), 2)
+            for unit in state["units"]:
+                self.assertEqual(unit["speed"], catalogue[unit["creature"]]["speed"], "No native-terrain speed bonus on sand")
             self.assertTrue(all(u["count"] == 99999 for u in state["units"]))
             occupied = [hex for u in state["units"] for hex in u["footprint"]]
             self.assertEqual(len(occupied), len(set(occupied)))

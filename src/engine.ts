@@ -30,7 +30,7 @@ export class EngineClient {
     this.session = envelope.session;
     return envelope.response.result as T;
   }
-  connect() { return this.request<{ backend: string; creatures: NativeCreature[]; rulesProfile: string; customPacks: boolean; heroSpells: boolean }>('catalogue'); }
+  connect() { this.session = undefined; return this.request<{ backend: string; creatures: NativeCreature[]; rulesProfile: string; customPacks: boolean; heroSpells: boolean }>('catalogue'); }
   create(seed: number, armies: ArmyStack[][]) { return this.request<EngineResult>('create', { seed, armies }); }
   act(state: EngineState, action: string, options: Record<string, number> = {}) {
     return this.request<EngineResult>('act', { revision: state.revision, stack: state.activeStack, action, ...options });
