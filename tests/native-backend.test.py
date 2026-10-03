@@ -293,5 +293,87 @@ class NativeBackendTests(unittest.TestCase):
         self.assertFalse(forbidden['ok']); self.assertEqual(self.request('state')['result']['state'], state)
 
 
+    def test_scenario_catalogue_and_native_terrain_bonuses(self):
+        catalogue = self.request('catalogue')['result']
+        scenes = catalogue['scenarios']
+        self.assertEqual([t['id'] for t in scenes['terrains']], list(range(8)))
+        self.assertEqual(scenes['layoutCount'], 1296)
+        self.assertFalse(scenes['default']['obstacles'])
+        for terrain in scenes['terrains']:
+            self.assertTrue(all(field['label'] for field in terrain['battlefields']))
+            self.assertNotIn('core:ship', [field['key'] for field in terrain['battlefields']])
+        base = {c['key']: c for c in catalogue['creatures']}
+        armies = [[{'creature': 7, 'count': 20}], [{'creature': 58, 'count': 100}]]
+        for terrain in scenes['terrains']:
+            scenario = dict(terrain=terrain['id'], battlefield=terrain['battlefields'][0]['key'], obstacles=False, layout=148)
+            response = self.request('deployment', seed=1337, armies=armies, scenario=scenario)
+            self.assertTrue(response['ok'], response.get('error'))
+            state = response['result']['state']
+            self.assertEqual(state['scenario'], scenario)
+            self.assertEqual(state['obstacles'], [])
+            for unit in state['units']:
+                bonus = int((unit['side'] == 0 and terrain['id'] == 2) or (unit['side'] == 1 and terrain['id'] == 0))
+                for stat in ['attack', 'defense', 'speed']:
+                    self.assertEqual(unit[stat], base[unit['creature']][stat] + bonus)
+
+    def test_native_obstacle_layout_preview_occupancy_and_pathfinding(self):
+        armies = [[{'creature': 11, 'count': 20}, {'creature': 7, 'count': 20}], [{'creature': 58, 'count': 100}]]
+        scenario = dict(terrain=2, battlefield='core:grass_pines', obstacles=True, layout=148)
+        preview = self.request('deployment', seed=1337, armies=armies, scenario=scenario)['result']['state']
+        state = self.request('create', seed=1337, armies=armies, scenario=scenario)['result']['state']
+        self.assertEqual(preview['obstacles'], state['obstacles'])
+        self.assertEqual(preview['units'], state['units'])
+        blocked = set(state['obstacles'])
+        self.assertTrue(blocked)
+        occupied = {h for unit in state['units'] for h in unit['footprint']}
+        self.assertFalse(blocked & occupied)
+        actor = next(u for u in state['units'] if u['id'] == state['activeStack'])
+        self.assertEqual(len(actor['footprint']), 2)
+        self.assertTrue(state['legal']['moves'])
+        for move in state['legal']['moves']:
+            for hex_id in move['path']:
+                footprint = {hex_id, hex_id - 1}  # Native attacker double-wide orientation.
+                self.assertFalse(footprint & blocked)
+                self.assertFalse(footprint & (occupied - set(actor['footprint'])))
+        shifted = self.request('deployment', seed=1337, armies=armies, scenario={**scenario, 'layout': 149})
+        self.assertTrue(shifted['ok'], shifted.get('error'))
+        self.assertNotEqual(shifted['result']['state']['obstacles'], state['obstacles'])
+        self.assertEqual(self.request('state')['result']['state'], state)
+        # Moving to a generated blocked hex and deploying on it must be rejected atomically.
+        self.assertFalse(self.request('act', revision=state['revision'], stack=state['activeStack'], action='move', hex=min(blocked))['ok'])
+        invalid = [[{'creature': 7, 'count': 20, 'hex': min(blocked)}], armies[1]]
+        self.assertFalse(self.request('create', seed=1337, armies=invalid, scenario=scenario)['ok'])
+        self.assertEqual(self.request('state')['result']['state'], state)
+        after = self.act(state, 'ai')['state']
+        self.assertTrue(all(not blocked.intersection(unit['footprint']) for unit in after['units'] if unit['count']))
+
+    def test_special_ground_native_magic_and_spell_restrictions(self):
+        armies = [[{'creature': 3, 'count': 30}, {'creature': 0, 'count': 30}], [{'creature': 58, 'count': 100}]]
+        for field, expected in [('core:grass_pines', [3, 0]), ('core:magic_plains', [5, 5])]:
+            response = self.request('create', seed=1337, armies=armies, heroes=[self.hero([53]), None], scenario=dict(terrain=2, battlefield=field, obstacles=False, layout=148))
+            self.assertTrue(response['ok'], response.get('error'))
+            state = response['result']['state']
+            target = self.spell_targets(state, 53)[0]
+            after = self.act(state, 'spell', spell=53, targets=target)['state']
+            allies = sorted((u for u in state['units'] if u['side'] == 0), key=lambda u: u['slot'])
+            self.assertEqual([next(u for u in after['units'] if u['id'] == before['id'])['speed'] - before['speed'] for before in allies], expected)
+        response = self.request('create', seed=1337, armies=armies, heroes=[self.hero([15, 18]), None], scenario=dict(terrain=2, battlefield='core:cursed_ground', obstacles=False, layout=148))
+        self.assertTrue(response['ok'], response.get('error'))
+        state = response['result']['state']
+        spells = {s['id']: s for s in state['heroes'][0]['spells']}
+        self.assertTrue(spells[15]['castable'])
+        self.assertFalse(spells[18]['castable'])
+        self.assertFalse(self.request('spellTargets', revision=state['revision'], stack=state['activeStack'], spell=18)['ok'])
+        self.assertEqual(self.request('state')['result']['state'], state)
+
+    def test_invalid_scene_configuration_preserves_active_battle(self):
+        armies = [[{'creature': 7, 'count': 20}], [{'creature': 58, 'count': 100}]]
+        state = self.create(*armies)
+        for bad in [{'terrain': 8}, {'layout': 1296}, {'layout': -1}, {'obstacles': 1}, {'terrain': 0, 'battlefield': 'core:grass_pines'}, {'battlefield': 'core:ship'}, {'unknown': True}]:
+            response = self.request('create', seed=1337, armies=armies, scenario=bad)
+            self.assertFalse(response['ok'], bad)
+            self.assertEqual(self.request('state')['result']['state'], state)
+
+
 if __name__ == "__main__":
     unittest.main()

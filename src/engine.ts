@@ -8,6 +8,7 @@ export interface NativeUnit {
   speed: number; flying: boolean; footprint: number[];
 }
 export interface EngineState {
+  scenario?: ScenarioConfig;
   revision: number; round: number; activeStack: number | null; winner?: number | null;
   heroes?: (NativeHero | null)[]; units: NativeUnit[]; obstacles: number[]; queue?: number[];
   legal?: { wait: boolean; defend: boolean; moves: { hex: number; path: number[] }[];
@@ -27,7 +28,9 @@ export interface NativeCreature { id: number; key: string; label: string; health
 export interface EngineResult { state: EngineState; events: EngineEvent[] }
 export interface ArmyStack { creature: number; count: number; slot?: number; hex?: number }
 export interface TownArmyPreset { weeks: number; profile: string; armies: { slot: number; base: number; upgraded: number; weekly: number; count: number }[][] }
-export interface EngineCatalogue { backend: string; battleAI?: string; spells: SpellDefinition[]; skills: { id: number; label: string }[]; tenWeekTownArmies: TownArmyPreset; creatures: NativeCreature[]; rulesProfile: string; customPacks: boolean; customMechanisms?: string[]; heroSpells: boolean; creatureSpells?: boolean }
+export interface ScenarioConfig { terrain: number; battlefield: string; obstacles: boolean; layout: number }
+export interface ScenarioCatalogue { default: ScenarioConfig; layoutCount: number; terrains: { id: number; key: string; label: string; battlefields: { key: string; label: string; special: boolean }[] }[] }
+export interface EngineCatalogue { scenarios?: ScenarioCatalogue; backend: string; battleAI?: string; spells: SpellDefinition[]; skills: { id: number; label: string }[]; tenWeekTownArmies: TownArmyPreset; creatures: NativeCreature[]; rulesProfile: string; customPacks: boolean; customMechanisms?: string[]; heroSpells: boolean; creatureSpells?: boolean }
 export class EngineClient {
   private session?: string;
   private loadedPack?: CreaturePack;
@@ -52,8 +55,8 @@ export class EngineClient {
     this.loadedPack = { version: 1, creatures: [...(this.loadedPack?.creatures ?? []), ...pack.creatures] };
     return info;
   }
-  deployment(seed: number, armies: ArmyStack[][], heroes?: (HeroConfig | null)[]) { return this.request<EngineResult>('deployment', { seed, armies, heroes }); }
-  create(seed: number, armies: ArmyStack[][], heroes?: (HeroConfig | null)[]) { return this.request<EngineResult>('create', { seed, armies, heroes }); }
+  deployment(seed: number, armies: ArmyStack[][], heroes?: (HeroConfig | null)[], scenario?: ScenarioConfig) { return this.request<EngineResult>('deployment', { seed, armies, heroes, scenario }); }
+  create(seed: number, armies: ArmyStack[][], heroes?: (HeroConfig | null)[], scenario?: ScenarioConfig) { return this.request<EngineResult>('create', { seed, armies, heroes, scenario }); }
   act(state: EngineState, action: string, options: Record<string, unknown> = {}) {
     return this.request<EngineResult>('act', { revision: state.revision, stack: state.activeStack, action, ...options });
   }

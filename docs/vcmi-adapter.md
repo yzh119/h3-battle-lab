@@ -40,7 +40,7 @@ Verified locally:
 
 The generic backend now accepts both armies (up to seven stacks each) from all 28 original Castle/Necropolis definitions. Actual engine integration tests cover default and explicit deployment, double-wide occupancy, legal movement, waiting, defense, ranged double attacks, melee/retaliation/extra strikes, rejected stale/illegal requests, atomic failed creation, victory cleanup and a fresh battle. Browser tests connect through the real HTTP transport with artwork intentionally missing, check damage playback at impact, compare the displayed final state with the native response and exercise defense/reset. Optional local GLB tests also verify animated bone transforms.
 
-Optional custom heroes, secondary skills, native hero/creature spell commands and versioned custom-creature mod imports are now connected. Named heroes/specialties/artifacts, configurable terrain/obstacles, siege and WASM remain pending. The battlefield and the army containers’ map tiles are both fixed sand, without initial obstacles; spell-created obstacles are engine-managed. A fixture check verifies that all 28 creatures retain their base speed rather than inheriting grass-native bonuses from the upstream test map. Unknown native messages remain generic authoritative updates; some creature abilities will need richer visual events and dedicated tests. This evidence does not establish full original H3 parity.
+Optional custom heroes, secondary skills, native hero/creature spell commands and versioned custom-creature mod imports are now connected. Named heroes/specialties/artifacts, siege and WASM remain pending. Terrain and initial obstacles are configurable through the native interface; sand without initial obstacles remains the default. The battlefield and the army containers’ map tiles use the same selected terrain; spell-created obstacles are engine-managed. A fixture check verifies that all 28 creatures retain their base speed rather than inheriting grass-native bonuses from the upstream test map. Unknown native messages remain generic authoritative updates; some creature abilities will need richer visual events and dedicated tests. This evidence does not establish full original H3 parity.
 
 For an existing compatible macOS Ninja build, bootstrap an owned derivative without rebuilding or modifying the upstream tree:
 
@@ -110,7 +110,7 @@ The local HTTP envelope is `{session?,request}` at `/api/engine`, with `{session
 ## Remaining implementation
 
 1. Replace the local relink bootstrap with a pinned dedicated source build; upstream files remain untouched.
-2. Add named heroes, specialties/artifacts, configurable terrain/obstacles, siege and richer effect events; verify remaining creature abilities and original H3 differences in the engine.
+2. Add named heroes, specialties/artifacts, siege and richer effect events; verify remaining creature abilities and original H3 differences in the engine.
 3. Extend the standard custom mod translator with further verified mechanisms, native faction selection and engine scripts. Advertise only verified engine capabilities.
 4. Review the integrated 28 private models and remaining material/animation fidelity; loading does not establish appearance acceptance.
 5. Compile the same wrapper with Emscripten. Platform paths, filesystems, threading, dynamic libraries and scripting need browser support. No WASM build has been demonstrated.
@@ -126,3 +126,12 @@ VCMI-Gym's Python/pybind11 environment and threaded connector are native referen
 - [VCMI-Gym threaded connector](https://github.com/smanolloff/vcmi-gym/blob/main/vcmi_gym/connectors/v15/threadconnector.h)
 
 VCMI's GPL license applies to VCMI and derived integrations; the viewer's MIT license does not relicense those components. Complete game resources and art remain outside the public checkout.
+
+
+## Native scene configuration
+
+`catalogue.scenarios` supplies eight original land terrains, allowed ordinary/special battlefield keys, a default configuration and `layoutCount`. Both `create` and `deployment` accept optional `scenario: { terrain, battlefield, obstacles, layout }`. Terrain IDs are original 0–7; battlefield keys must belong to that terrain or the original special-ground set. Ship fields are excluded. Omitted settings retain the neutral sand fixture, no initial obstacles and layout 148.
+
+`layout` is a 0–1295 index into the private 36×36 map. The selected tile controls VCMI's obstacle-placement seed. The combat RNG still uses the separate `seed` argument. VCMI's `BattleInfo::setupBattle` generates the layout; its blocked hexes, double-wide footprints and legal paths are returned to the browser. `state.scenario` describes the applied configuration. Deployment previews preserve an existing battle and reproduce the initial obstacles/units of creation with the same inputs. Invalid scenes and blocked explicit deployments are rejected without replacing that battle.
+
+The wrapper updates the fixture's map terrain as well as battle terrain before native setup. Actual integration tests check Castle grass and Necropolis dirt bonuses, unchanged base attributes on other selected land terrain, walking paths avoiding native obstacles, double-wide occupancy, deterministic preview/create, Magic Plains granting expert mass Haste without learned Air Magic, and Cursed Ground rejecting Implosion while allowing Magic Arrow. These tests establish that the interface uses compiled-engine behavior; they do not certify all terrain rules against original H3. Browser tests cover hover attributes, reset, both cameras, missing art and obstacle visibility over an image background. Ground colors and per-hex obstacle rocks are procedural presentation; they do not implement combat or reproduce the original obstacle artwork.

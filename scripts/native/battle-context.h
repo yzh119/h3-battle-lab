@@ -8,6 +8,8 @@
 #include "lib/spells/CSpellHandler.h"
 #include "lib/spells/CSpell.h"
 #include "lib/CStack.h"
+#include "lib/TerrainHandler.h"
+#include "lib/BattleFieldHandler.h"
 #include "lib/StartInfo.h"
 #include "lib/battle/BattleInfo.h"
 #include "lib/battle/BattleLayout.h"
@@ -55,6 +57,9 @@ JsonNode snapshot(const CGameState & state)
     if (state.currentBattles.empty()) return result;
     const auto & battle = *state.currentBattles.front();
     result["round"].Integer() = battle.getRound();
+    result["scenario"]["terrain"].Integer() = battle.terrainType.getNum();
+    result["scenario"]["battlefield"].String() = LIBRARY->battlefieldsHandler->getById(battle.battlefieldType)->getJsonKey();
+    result["scenario"]["layout"].Integer() = battle.tile.y * 36 + battle.tile.x;
     result["activeStack"].Integer() = battle.activeStack;
     if (const auto winner = battle.battleIsFinished()) result["winner"].Integer() = static_cast<int>(*winner);
     auto & units = result["units"].Vector();
@@ -134,7 +139,12 @@ public:
     std::shared_ptr<CGameState> game;
     std::vector<JsonNode> events;
     JsonNode lastState;
-    JsonNode currentState() const { return game->currentBattles.empty() ? lastState : snapshot(*game); }
+    bool initialObstacles = false;
+    JsonNode currentState() const {
+        auto result = game->currentBattles.empty() ? lastState : snapshot(*game);
+        result["scenario"]["obstacles"].Bool() = initialObstacles;
+        return result;
+    }
     void setState(EServerState value) override { state = value; }
     EServerState getState() const override { return state; }
     bool isPlayerHost(const PlayerColor &) const override { return true; }

@@ -147,7 +147,7 @@ test('native attributes appear on hover and VCMI AI can take turns', async ({ pa
   const slot = page.locator('.army-slot[data-team="0"][data-slot="0"]');
   await slot.hover(); await expect(page.locator('#unit-tooltip')).toContainText('骷髅兵');
   await expect(page.locator('#unit-tooltip')).toContainText('攻击 5 · 防御 4');
-  await expect(page.locator('#unit-tooltip')).toContainText('VCMI 兵种定义');
+  await expect(page.locator('#unit-tooltip')).toContainText('VCMI 部署预览');
   await page.locator('#closeup').click();
   const bounds = await page.locator('#battle').boundingBox();
   await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
@@ -292,4 +292,45 @@ test('archangel active ability restores a dead army stack through the native eng
   expect(after.state.units.find((u: any) => u.id === angel.id).casts).toBe(0);
   expect(after.units.find((u: any) => u.kind === 'pikeman').animation).toBe('idle');
   await expect(page.locator('#combat-log')).toContainText('Resurrection'); expect(errors).toEqual([]);
+});
+
+
+test('native terrain and obstacle previews match combat and remain visible with a backdrop', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  await missingArt(page);
+  await page.route('**/local-assets/manifest.json', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ units: {}, backgrounds: [{ label: '场景测试', url: '/scenario-backdrop.svg' }] }) }));
+  await page.route('**/scenario-backdrop.svg', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><rect width="1200" height="800" fill="#687850"/></svg>' }));
+  const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
+  await open(page); await expect(page.locator('#start-battle')).toBeEnabled();
+  await expect(page.locator('#terrain-picker option')).toHaveCount(8);
+  await page.locator('#creature-picker').selectOption('crusader'); await page.locator('#replace-unit').click();
+  await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#terrain-picker').selectOption('2'); await page.locator('#native-obstacles').check();
+  await expect(page.locator('#start-battle')).toBeEnabled();
+  let before = await snapshot(page);
+  expect(before.deployment.scenario).toEqual({ terrain: 2, battlefield: 'core:grass_pines', obstacles: true, layout: 148 });
+  expect(before.terrain).toBe(2); expect(before.backdrop).toBe(true);
+  expect(before.renderedObstacles).toBe(new Set(before.deployment.obstacles).size);
+  expect(before.renderedObstacles).toBeGreaterThan(0);
+  await page.locator('.army-slot[data-team="0"][data-slot="0"]').hover();
+  await expect(page.locator('#unit-tooltip')).toContainText('攻击 13 · 防御 13');
+  await expect(page.locator('#unit-tooltip')).toContainText('VCMI 部署预览');
+  const firstLayout = before.deployment.obstacles;
+  await page.locator('#next-layout').click(); await expect(page.locator('#start-battle')).toBeEnabled();
+  before = await snapshot(page); expect(before.deployment.scenario.layout).toBe(149);
+  expect(before.deployment.obstacles).not.toEqual(firstLayout);
+  await page.locator('#closeup').click(); expect((await snapshot(page)).renderedObstacles).toBe(before.renderedObstacles);
+  await page.locator('#overview').click();
+  await page.locator('#start-battle').click(); await expect(page.locator('#defend-turn')).toBeEnabled();
+  const started = await snapshot(page);
+  expect(started.state.scenario).toEqual(before.deployment.scenario);
+  expect(started.state.obstacles).toEqual(before.deployment.obstacles);
+  expect(started.units.map((u: any) => u.cell)).toEqual(before.units.map((u: any) => u.cell));
+  await expect(page.locator('#terrain-picker')).toBeDisabled(); await expect(page.locator('#next-layout')).toBeDisabled();
+  await page.screenshot({ path: '.local/native-terrain-obstacles.png' });
+  await page.locator('#reset').click(); await expect(page.locator('#start-battle')).toBeEnabled();
+  const reset = await snapshot(page); expect(reset.deployment.scenario).toEqual(before.deployment.scenario);
+  expect(reset.deployment.obstacles).toEqual(before.deployment.obstacles);
+  await page.locator('#native-obstacles').uncheck(); await expect(page.locator('#start-battle')).toBeEnabled();
+  expect((await snapshot(page)).renderedObstacles).toBe(0); expect(errors).toEqual([]);
 });

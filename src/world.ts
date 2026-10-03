@@ -64,7 +64,7 @@ export function createWorld(canvas: HTMLCanvasElement) {
   function rock(x: number, z: number, size: number) {
     const m = new THREE.Mesh(rockGeo, rockMat); m.position.set(x, size * .3, z); m.scale.set(size, size * .62, size * .85); m.rotation.set(rng(), rng() * 6, rng()); m.castShadow = true; m.receiveShadow = true; scenery.add(m); return m;
   }
-  const obstacleGroup = new THREE.Group(); scenery.add(obstacleGroup);
+  const obstacleGroup = new THREE.Group(); scene.add(obstacleGroup);
   function setObstacles(hexes: number[]) {
     obstacleGroup.clear();
     for (const id of new Set(hexes)) {
@@ -93,6 +93,21 @@ export function createWorld(canvas: HTMLCanvasElement) {
   const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, 8000); const transform = new THREE.Object3D();
   for (let i = 0; i < 8000; i++) { const x = (rng() - .5) * 58, z = (rng() - .5) * 44; transform.position.set(x, -.025, z); transform.rotation.set(0, rng() * 6, (rng() - .5) * .45); transform.scale.setScalar(.4 + rng() * 1.2); transform.updateMatrix(); tufts.setMatrixAt(i, transform.matrix); }
   scenery.add(tufts);
+  let terrainId: number | undefined;
+  function setTerrain(id: number) {
+    if (id === terrainId) return; terrainId = id;
+    // Color and scenery choices are presentation only; combat bonuses stay native.
+    const palette = [['#68513d', '#876c44'], ['#b99c62', '#d8c58e'], ['#77734e', '#555e39'], ['#bec9cc', '#eef1ec'], ['#555943', '#687346'], ['#877755', '#a08c63'], ['#625950', '#78705d'], ['#352a26', '#6c3b2b']][id] ?? ['#77734e', '#555e39'];
+    const low = new THREE.Color(palette[0]), high = new THREE.Color(palette[1]), values = groundGeometry.attributes.color;
+    for (let i = 0; i < positions.count; i++) {
+      const t = THREE.MathUtils.clamp(.5 + .3 * Math.sin(positions.getX(i) * .35) * Math.cos(positions.getZ(i) * .29), 0, 1);
+      const color = low.clone().lerp(high, t); values.setXYZ(i, color.r, color.g, color.b);
+    }
+    values.needsUpdate = true;
+    trunks.visible = crowns.visible = [0, 2, 3, 4].includes(id);
+    tufts.visible = [0, 2, 4, 5].includes(id);
+    leaf.color.set(id === 3 ? '#9baea5' : '#384c3b');
+  }
   const shadowFloor = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), new THREE.ShadowMaterial({ opacity: .32 }));
   shadowFloor.rotation.x = -Math.PI / 2; shadowFloor.position.y = -.025; shadowFloor.receiveShadow = true; shadowFloor.visible = false; scene.add(shadowFloor);
   let backdrop: THREE.Texture | undefined, plateMode = false, selectedBackdrop = false, plateRequest = 0;
@@ -151,5 +166,5 @@ export function createWorld(canvas: HTMLCanvasElement) {
     const bg = dusk ? '#66788a' : '#9aa79f'; if (!plateMode) scene.background = new THREE.Color(bg); scene.fog?.color.set(bg);
     sun.color.set(dusk ? '#bacfea' : '#ffe0a4'); sun.intensity = dusk ? 1.8 : 3.2; ambient.intensity = dusk ? .8 : 1.25;
   }
-  return { renderer, scene, camera, controls, grid, pickable, hover, showPath, setObstacles, frameUnit, resetCamera, setMood, sun, zoomBy, setBackdrop, freeCamera, isBackdrop: () => plateMode };
+  return { renderer, scene, camera, controls, grid, pickable, hover, showPath, setObstacles, setTerrain, terrain: () => terrainId, obstacleCount: () => obstacleGroup.children.length, frameUnit, resetCamera, setMood, sun, zoomBy, setBackdrop, freeCamera, isBackdrop: () => plateMode };
 }

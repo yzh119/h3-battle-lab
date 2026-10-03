@@ -100,10 +100,48 @@ JsonNode tenWeekTownArmies()
     return result;
 }
 
+std::vector<BattleField> allowedBattlefields(int terrain)
+{
+    auto fields = LIBRARY->terrainTypeHandler->getById(TerrainId(terrain))->battleFields;
+    // Keep the existing neutral sand fixture as the default and expose its mesa variant.
+    if (terrain == static_cast<int>(TerrainId::SAND)) {
+        for (const auto & field : LIBRARY->battlefieldsHandler->objects)
+            if (field && field->getJsonKey() == "core:sand_shore") fields.insert(fields.begin(), field->getId());
+    }
+    for (const auto & field : LIBRARY->battlefieldsHandler->objects)
+        if (field && field->getModScope() == "core" && field->isSpecial && field->getJsonKey() != "core:ship") fields.push_back(field->getId());
+    return fields;
+}
+
+JsonNode scenarioCatalogue()
+{
+    JsonNode result;
+    result["default"]["terrain"].Integer() = static_cast<int>(TerrainId::SAND);
+    result["default"]["battlefield"].String() = LIBRARY->battlefieldsHandler->getById(allowedBattlefields(static_cast<int>(TerrainId::SAND)).front())->getJsonKey();
+    result["default"]["obstacles"].Bool() = false;
+    result["default"]["layout"].Integer() = 148;
+    result["layoutCount"].Integer() = 36 * 36;
+    for (int id = 0; id < 8; ++id) {
+        const auto * terrain = LIBRARY->terrainTypeHandler->getById(TerrainId(id));
+        JsonNode entry; entry["id"].Integer() = id; entry["key"].String() = terrain->getJsonKey();
+        entry["label"].String() = terrain->getNameTranslated();
+        std::set<int> unique;
+        for (const auto & fieldId : allowedBattlefields(id)) {
+            if (!unique.insert(fieldId.getNum()).second) continue;
+            const auto * field = LIBRARY->battlefieldsHandler->getById(fieldId);
+            JsonNode data; data["key"].String() = field->getJsonKey(); data["label"].String() = field->getNameTranslated().empty() ? field->getJsonKey() : field->getNameTranslated();
+            data["special"].Bool() = field->isSpecial; entry["battlefields"].Vector().push_back(std::move(data));
+        }
+        result["terrains"].Vector().push_back(std::move(entry));
+    }
+    return result;
+}
+
 JsonNode catalogue()
 {
     JsonNode result;
     result["backend"].String() = "vcmi-native";
+    result["scenarios"] = scenarioCatalogue();
     result["rulesProfile"].String() = customDefinitions.empty() ? "base-reference" : "custom-reference";
     result["customPacks"].Bool() = true;
     for (const auto * mechanism : {"flying", "additionalAttacks", "regeneration", "retaliations", "blocksRetaliation", "shooter", "undead", "deathCloud"})
@@ -161,8 +199,30 @@ public:
 
     explicit BattleSession(const JsonNode & request)
     {
-        fields(request, {"version", "requestId", "op", "seed", "armies", "heroes"});
+        fields(request, {"version", "requestId", "op", "seed", "armies", "heroes", "scenario"});
         const auto seed = integer(request["seed"], 0, 2147483647);
+        const auto & scene = request["scenario"];
+        int terrain = static_cast<int>(TerrainId::SAND), layoutId = 148;
+        bool obstacles = false;
+        if (!scene.isNull()) {
+            fields(scene, {"terrain", "battlefield", "obstacles", "layout"});
+            if (!scene["terrain"].isNull()) terrain = integer(scene["terrain"], 0, 7);
+            if (!scene["layout"].isNull()) layoutId = integer(scene["layout"], 0, 36 * 36 - 1);
+            if (!scene["obstacles"].isNull()) {
+                if (!scene["obstacles"].isBool()) throw std::runtime_error("Obstacle setting must be boolean");
+                obstacles = scene["obstacles"].Bool();
+            }
+        }
+        const auto availableFields = allowedBattlefields(terrain);
+        BattleField field = availableFields.front();
+        if (!scene["battlefield"].isNull()) {
+            if (!scene["battlefield"].isString()) throw std::runtime_error("Battlefield key required");
+            const auto found = std::find_if(availableFields.begin(), availableFields.end(), [&](const auto & id) { return LIBRARY->battlefieldsHandler->getById(id)->getJsonKey() == scene["battlefield"].String(); });
+            if (found == availableFields.end()) throw std::runtime_error("Battlefield does not support this terrain");
+            field = *found;
+        }
+        const int3 battleTile{layoutId % 36, layoutId / 36, 0};
+        server.initialObstacles = obstacles;
         JsonNode armies = request["armies"];
         if (!armies.isVector() || armies.Vector().size() != 2) throw std::runtime_error("Two armies required");
         for (auto & army : armies.Vector())
@@ -224,6 +284,10 @@ public:
         }
         GameRandomizer randomizer(*game); randomizer.setSeed(seed);
         Load::ProgressAccumulator progress; game->init(&maps, &start, randomizer, progress, false);
+        // Army containers and battle tile share the selected terrain. No frontend
+        // stat compensation: native terrain and battlefield bonuses use game state.
+        for (int y = 0; y < 36; ++y) for (int x = 0; x < 36; ++x)
+            game->getMap().getTile({x, y, 0}).terrainType = TerrainId(terrain);
         server.game = game; handler = std::make_unique<CGameHandler>(server, game);
         handler->randomizer->setSeed(seed);
         BattleSideArray<CGHeroInstance *> armyObjects = {};
@@ -253,7 +317,7 @@ public:
             }
         if (!armyObjects[BattleSide::ATTACKER] || !armyObjects[BattleSide::DEFENDER]) throw std::runtime_error("Missing army objects");
         BattleLayout layout = BattleLayout::createDefaultLayout(*game, armyObjects[BattleSide::ATTACKER], armyObjects[BattleSide::DEFENDER]);
-        layout.obstaclesAllowed = false; layout.tacticsAllowed = false;
+        layout.obstaclesAllowed = obstacles; layout.tacticsAllowed = false;
         for (const auto side : {BattleSide::ATTACKER, BattleSide::DEFENDER})
         {
             const auto & stacks = armies.Vector().at(static_cast<int>(side)).Vector();
@@ -263,16 +327,13 @@ public:
                 if (!stack["hex"].isNull()) layout.units[side][slot] = BattleHex(stack["hex"].Integer());
             }
         }
-        const std::string fieldName = "core:sand_shore";
-        const auto field = LIBRARY->identifiers()->getIdentifier(ModScope::scopeGame(), "battlefield", fieldName);
-        if (!field) throw std::runtime_error("Missing neutral battlefield");
         BattleSideArray<const CArmedInstance *> nativeArmies = {armyObjects[BattleSide::ATTACKER], armyObjects[BattleSide::DEFENDER]};
         // Army containers are on a real map; fighting heroes are explicitly opt-in.
         BattleStart begin; begin.battleID = BattleID(0);
         BattleSideArray<const CGHeroInstance *> fightingHeroes = {nullptr, nullptr};
         if (!heroes.isNull()) for (const auto side : {BattleSide::ATTACKER, BattleSide::DEFENDER})
             if (!heroes.Vector().at(static_cast<int>(side)).isNull()) fightingHeroes[side] = armyObjects[side];
-        begin.info = BattleInfo::setupBattle(game.get(), {4, 4, 0}, TerrainId::SAND, BattleField(*field), nativeArmies, fightingHeroes, layout, nullptr);
+        begin.info = BattleInfo::setupBattle(game.get(), battleTile, TerrainId(terrain), field, nativeArmies, fightingHeroes, layout, nullptr);
         std::set<int> occupied;
         // Let the engine place default double-wide formations. Explicit locations
         // must be honored exactly rather than silently relocated by getAvailableHex.
