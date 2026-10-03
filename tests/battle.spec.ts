@@ -259,3 +259,33 @@ test('custom creature import uses native stats and survives reset, rejection and
   expect((await snapshot(page)).state.units.some((u: any) => u.creature === 'battle-lab-custom:custom-spectral-guard')).toBe(true);
   expect((await snapshot(page)).state.heroes[0].attack).toBe(12);
 });
+
+test('archangel active ability restores a dead army stack through the native engine', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  await missingArt(page); const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await open(page); await expect(page.locator('#replace-unit')).toBeEnabled();
+  await page.locator('#creature-picker').selectOption('archangel'); await page.locator('#stack-count').fill('1'); await page.locator('#replace-unit').click();
+  await expect(page.locator('#add-unit')).toBeEnabled();
+  await page.locator('#creature-picker').selectOption('pikeman'); await page.locator('#team-picker').selectOption('0'); await page.locator('#stack-count').fill('10'); await page.locator('#add-unit').click();
+  await page.locator('.army-slot[data-team="1"][data-slot="0"]').click();
+  await page.locator('#creature-picker').selectOption('marksman'); await page.locator('#stack-count').fill('100'); await page.locator('#replace-unit').click();
+  await expect(page.locator('#start-battle')).toBeEnabled(); await page.locator('#start-battle').click();
+  await expect(page.locator('#wait-turn')).toBeEnabled();
+  const before = await snapshot(page), angel = before.state.units.find((u: any) => u.creature === 'core:archangel'), pikeman = before.state.units.find((u: any) => u.creature === 'core:pikeman');
+  await page.locator('#wait-turn').click(); await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+  await page.evaluate((id: number) => (window as any).battleLab.attack(id), pikeman.id);
+  await expect.poll(async () => (await snapshot(page)).state.activeStack).toBe(angel.id);
+  expect((await snapshot(page)).state.units.find((u: any) => u.id === pikeman.id).count).toBe(0);
+  await page.locator('#spellbook summary').click(); await expect(page.locator('#spell-caster')).toHaveValue('creature');
+  await expect(page.locator('#hero-status')).toContainText('1 次');
+  await expect(page.locator('#cast-spell')).toBeEnabled();
+  const option = page.locator('#spell-target option').filter({ hasText: 'Pikeman' });
+  await expect(option).toHaveCount(1); await page.locator('#spell-target').selectOption((await option.getAttribute('value'))!);
+  await page.locator('#cast-spell').click(); await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+  const after = await snapshot(page);
+  expect(after.state.units.find((u: any) => u.id === pikeman.id).count).toBe(10);
+  expect(after.state.units.find((u: any) => u.id === pikeman.id).health).toBe(100);
+  expect(after.state.units.find((u: any) => u.id === angel.id).casts).toBe(0);
+  expect(after.units.find((u: any) => u.kind === 'pikeman').animation).toBe('idle');
+  await expect(page.locator('#combat-log')).toContainText('Resurrection'); expect(errors).toEqual([]);
+});

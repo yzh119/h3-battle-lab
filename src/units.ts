@@ -41,6 +41,7 @@ export class UnitView {
   private remaining = 0;
   imported = false;
   playbackHp?: number;
+  allowDeadTarget = false;
   get displayedHp(): number { return this.playbackHp ?? this.unit.hp; }
   private assetRevision = 0;
   private disposed = false;
@@ -135,6 +136,6 @@ export class UnitView {
       this.model.rotation.z = this.current === 'death' ? -Math.PI / 2 : 0;
     }
     this.ring.material.opacity = selected ? .8 + .18 * Math.sin(performance.now() / 350) : .35;
-    this.proxy.visible = this.displayedHp > 0; this.ring.visible = this.displayedHp > 0;
+    this.proxy.visible = this.displayedHp > 0 || this.allowDeadTarget; this.ring.visible = this.displayedHp > 0;
   }
 }

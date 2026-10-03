@@ -109,6 +109,7 @@ JsonNode catalogue()
     for (const auto * mechanism : {"flying", "additionalAttacks", "regeneration", "retaliations", "blocksRetaliation", "shooter", "undead", "deathCloud"})
         result["customMechanisms"].Vector().emplace_back(mechanism);
     result["heroSpells"].Bool() = true;
+    result["creatureSpells"].Bool() = true;
     for (const auto & spell : LIBRARY->spellh->objects)
     {
         if (spell->getId().getNum() >= 70 || !spell->isCombat() || spell->isCreatureAbility()) continue;
@@ -339,15 +340,19 @@ public:
 
     JsonNode spellTargets(const JsonNode & request) const
     {
-        fields(request, {"version", "requestId", "op", "revision", "stack", "spell"});
+        fields(request, {"version", "requestId", "op", "revision", "stack", "spell", "caster"});
         if (integer(request["revision"], 0, INT64_MAX) != revision || game->currentBattles.empty()) throw std::runtime_error("Stale or ended battle");
         const auto & battle = *game->currentBattles.front();
         const auto * actor = battle.battleActiveUnit();
         if (!actor || integer(request["stack"], 0, INT32_MAX) != actor->unitId()) throw std::runtime_error("Stack is not active");
-        const auto * hero = battle.battleGetOwnerHero(actor);
+        if (!request["caster"].isNull() && (!request["caster"].isString() || (request["caster"].String() != "hero" && request["caster"].String() != "creature"))) throw std::runtime_error("Unsupported caster");
+        const bool creatureCast = request["caster"].isString() && request["caster"].String() == "creature";
+        const auto * stack = battle.battleGetStackByID(actor->unitId());
+        const spells::Caster * caster = creatureCast ? static_cast<const spells::Caster *>(stack) : static_cast<const spells::Caster *>(battle.battleGetOwnerHero(actor));
+        const auto mode = creatureCast ? spells::Mode::CREATURE_ACTIVE : spells::Mode::HERO;
         const auto * spell = SpellID(integer(request["spell"], 0, 69)).toSpell();
-        if (!hero || !spell->isCombat() || spell->isCreatureAbility() || !spell->canBeCast(&battle, spells::Mode::HERO, hero)) throw std::runtime_error("Spell unavailable");
-        spells::BattleCast cast(&battle, hero, spells::Mode::HERO, spell); auto mechanics = spell->battleMechanics(&cast);
+        if (!caster || !spell->isCombat() || spell->isCreatureAbility() || (creatureCast && (!stack->canCast() || !stack->hasBonusOfType(BonusType::SPELLCASTER, BonusSubtypeID(spell->getId())))) || !spell->canBeCast(&battle, mode, caster)) throw std::runtime_error("Spell unavailable");
+        spells::BattleCast cast(&battle, caster, mode, spell); auto mechanics = spell->battleMechanics(&cast);
         const auto types = mechanics->getTargetTypes();
         JsonNode result; result["targets"].Vector();
         spells::Target prefix;
@@ -408,12 +413,15 @@ public:
                 native = *callback->spellAction;
             }
         }
-        else if (action == "spell")
+        else if (action == "spell" || action == "creatureSpell")
         {
-            const auto * hero = battle.battleGetOwnerHero(actor);
+            const bool creatureCast = action == "creatureSpell";
+            const auto * stack = battle.battleGetStackByID(actor->unitId());
+            const spells::Caster * caster = creatureCast ? static_cast<const spells::Caster *>(stack) : static_cast<const spells::Caster *>(battle.battleGetOwnerHero(actor));
+            const auto mode = creatureCast ? spells::Mode::CREATURE_ACTIVE : spells::Mode::HERO;
             const auto * spell = SpellID(integer(request["spell"], 0, 69)).toSpell();
-            if (!hero || !spell->isCombat() || spell->isCreatureAbility() || !spell->canBeCast(&battle, spells::Mode::HERO, hero)) throw std::runtime_error("Hero cannot cast this spell now");
-            spells::BattleCast cast(&battle, hero, spells::Mode::HERO, spell);
+            if (!caster || !spell->isCombat() || spell->isCreatureAbility() || (creatureCast && (!stack->canCast() || !stack->hasBonusOfType(BonusType::SPELLCASTER, BonusSubtypeID(spell->getId())))) || !spell->canBeCast(&battle, mode, caster)) throw std::runtime_error("Caster cannot cast this spell now");
+            spells::BattleCast cast(&battle, caster, mode, spell);
             if (!request["targets"].isVector() || request["targets"].Vector().size() > 2) throw std::runtime_error("Spell targets required");
             spells::Target targets;
             for (const auto & target : request["targets"].Vector())
@@ -431,7 +439,7 @@ public:
             const auto types = mechanics->getTargetTypes();
             const size_t targetCount = types.size() == 1 && types[0] == spells::AimType::NOTHING ? 0 : types.size();
             if (targets.size() != targetCount || !mechanics->canBeCastAt(targets)) throw std::runtime_error("Illegal spell target");
-            native.actionType = EActionType::HERO_SPELL; native.side = battle.playerToSide(battle.battleGetOwner(actor)); native.stackNumber = -1; native.spell = spell->getId(); native.setTarget(targets);
+            native.actionType = creatureCast ? EActionType::MONSTER_SPELL : EActionType::HERO_SPELL; native.side = battle.playerToSide(battle.battleGetOwner(actor)); native.stackNumber = creatureCast ? actor->unitId() : -1; native.spell = spell->getId(); native.setTarget(targets);
         }
         else if (action == "wait" && current["legal"]["wait"].Bool()) native = BattleAction::makeWait(actor);
         else if (action == "defend") native = BattleAction::makeDefend(actor);

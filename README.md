@@ -27,6 +27,12 @@ Open **战斗魔法** during battle to choose a learned spell and an engine-appr
 
 Native checks cover Magic Arrow damage/cost/cooldown, expert mass Haste, Teleport, Clone, elemental summoning, Resurrection/Animate Dead and AI spell selection. New summons and clones are synchronized as additional battlefield units; unsupported summon art uses procedural models. Hypnotized units retain their original army side while their engine controller determines input and AI ownership. Browser checks cover actual spellbook casting, damage, mana and summoned-unit rendering.
 
+## Active creature abilities
+
+The **战斗魔法与兵种能力** panel has separate **英雄魔法** and **兵种能力** modes. For the original Castle/Necropolis roster, Archangel Resurrection is the active creature spell. The native snapshot supplies the ability, current availability and remaining casts; native target queries include eligible dead stacks. Select a legal target on the canvas or in the target list and confirm the cast. The native `MONSTER_SPELL` action consumes the creature's turn and cast, rather than using a hero's mana or per-round spell allowance.
+
+Native and browser tests verify one Archangel restoring ten dead Pikemen, consuming its single cast, restoring the rendered stack and rejecting enemy/undead targets, noncasters and repeat use. This verifies that scenario; full creature/spell parity and richer casting animation remain pending.
+
 ## Army editor
 
 The hex grid is visible by default. Configuration previews request native deployment using the same armies and seed as battle creation, so initial hexes match the engine. The persistent army bars show seven numbered slots for each side. Click an occupied or empty slot, choose a creature/count under **配置双方阵容**, and click **配置选中格子**. Empty slots remain empty when other stacks are removed; explicit slot IDs are preserved by native battle creation and reset. **添加上场** remains a shortcut for the first available slot. Each team supports up to seven stacks. Set **每队数量** (1–99,999) before adding/replacing, or use **应用数量到选中队伍** to refill the selected stack at the configured count. Floor labels show surviving counts; the footer shows the last creature’s remaining HP. **替换选中** replaces the currently selected unit at the same cell and on the same team; **移除选中单位** removes it. The top menu selects any unit on either team. Reset restores the configured composition and deployment with full health. Configuration lasts for the current page session. Editing is locked during battle; reset restores the configured armies and reopens editing.

@@ -71,6 +71,17 @@ JsonNode snapshot(const CGameState & state)
         unit["count"].Integer() = stack->getCount();
         unit["health"].Integer() = stack->getAvailableHealth();
         unit["shots"].Integer() = stack->shots.available();
+        unit["casts"].Integer() = stack->casts.available();
+        unit["spells"].Vector();
+        for (const auto & bonus : *stack->getBonusesOfType(BonusType::SPELLCASTER)) {
+            if (bonus->parameters || !bonus->subtype.as<SpellID>().hasValue()) continue;
+            const auto * spell = bonus->subtype.as<SpellID>().toSpell();
+            JsonNode entry; entry["id"].Integer() = spell->getId().getNum();
+            entry["label"].String() = spell->getNameTranslated(); entry["key"].String() = spell->getJsonKey();
+            entry["level"].Integer() = spell->getLevel();
+            entry["castable"].Bool() = stack->canCast() && spell->canBeCast(&battle, spells::Mode::CREATURE_ACTIVE, stack);
+            unit["spells"].Vector().push_back(std::move(entry));
+        }
         unit["maxHealth"].Integer() = stack->getMaxHealth();
         unit["topHealth"].Integer() = stack->getFirstHPleft();
         unit["speed"].Integer() = stack->getMovementRange();

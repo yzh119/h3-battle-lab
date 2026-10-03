@@ -2,6 +2,7 @@ import type { CreaturePack } from './creatures.ts';
 /** Authoritative engine data and transport. No combat mechanics. */
 export interface NativeUnit {
   id: number; creature: string; label: string; side: number; controller: number; slot: number; hex: number;
+  casts?: number; spells?: (SpellDefinition & { castable: boolean })[];
   count: number; health: number; maxHealth: number; topHealth: number; shots: number;
   attack: number; defense: number; minDamage: number; maxDamage: number;
   speed: number; flying: boolean; footprint: number[];
@@ -26,7 +27,7 @@ export interface NativeCreature { id: number; key: string; label: string; health
 export interface EngineResult { state: EngineState; events: EngineEvent[] }
 export interface ArmyStack { creature: number; count: number; slot?: number; hex?: number }
 export interface TownArmyPreset { weeks: number; profile: string; armies: { slot: number; base: number; upgraded: number; weekly: number; count: number }[][] }
-export interface EngineCatalogue { backend: string; battleAI?: string; spells: SpellDefinition[]; skills: { id: number; label: string }[]; tenWeekTownArmies: TownArmyPreset; creatures: NativeCreature[]; rulesProfile: string; customPacks: boolean; customMechanisms?: string[]; heroSpells: boolean }
+export interface EngineCatalogue { backend: string; battleAI?: string; spells: SpellDefinition[]; skills: { id: number; label: string }[]; tenWeekTownArmies: TownArmyPreset; creatures: NativeCreature[]; rulesProfile: string; customPacks: boolean; customMechanisms?: string[]; heroSpells: boolean; creatureSpells?: boolean }
 export class EngineClient {
   private session?: string;
   private loadedPack?: CreaturePack;
@@ -56,6 +57,6 @@ export class EngineClient {
   act(state: EngineState, action: string, options: Record<string, unknown> = {}) {
     return this.request<EngineResult>('act', { revision: state.revision, stack: state.activeStack, action, ...options });
   }
-  spellTargets(state: EngineState, spell: number) { return this.request<{ targets: SpellTarget[] }>('spellTargets', { revision: state.revision, stack: state.activeStack, spell }); }
+  spellTargets(state: EngineState, spell: number, caster: 'hero' | 'creature' = 'hero') { return this.request<{ targets: SpellTarget[] }>('spellTargets', { revision: state.revision, stack: state.activeStack, spell, ...(caster === 'creature' ? { caster } : {}) }); }
   dispose() { return this.request('dispose'); }
 }

@@ -251,5 +251,47 @@ class NativeBackendTests(unittest.TestCase):
             self.assertEqual(restored['health'], restored['maxHealth'] * 2)
 
 
+    def test_archangel_resurrection_restores_corpse_consumes_native_cast_and_rejects_repeat(self):
+        state = self.create([{'creature': 13, 'count': 1}, {'creature': 0, 'count': 10, 'hex': 90}], [{'creature': 3, 'count': 100, 'hex': 96}])
+        archangel = next(u for u in state['units'] if u['creature'] == 'core:archangel')
+        pikeman = next(u for u in state['units'] if u['creature'] == 'core:pikeman')
+        self.assertEqual(archangel['casts'], 1)
+        self.assertEqual([s['id'] for s in archangel['spells']], [38])
+        self.assertFalse(self.request('spellTargets', revision=state['revision'], stack=state['activeStack'], spell=38, caster='creature')['ok'])
+        state = self.act(state, 'wait')['state']
+        state = self.act(state, 'shoot', target=pikeman['id'])['state']
+        self.assertEqual(next(u for u in state['units'] if u['id'] == pikeman['id'])['count'], 0)
+        self.assertEqual(state['activeStack'], archangel['id'])
+        targets = self.request('spellTargets', revision=state['revision'], stack=state['activeStack'], spell=38, caster='creature')
+        self.assertTrue(targets['ok'], targets.get('error'))
+        self.assertIn([{'unit': pikeman['id']}], targets['result']['targets'])
+        invalid = self.request('act', revision=state['revision'], stack=state['activeStack'], action='creatureSpell', spell=38, targets=[{'unit': next(u['id'] for u in state['units'] if u['side'] == 1)}])
+        self.assertFalse(invalid['ok']); self.assertEqual(self.request('state')['result']['state'], state)
+        result = self.act(state, 'creatureSpell', spell=38, targets=[{'unit': pikeman['id']}])
+        after = result['state']; revived = next(u for u in after['units'] if u['id'] == pikeman['id'])
+        self.assertEqual((revived['count'], revived['health']), (10, 100))
+        self.assertEqual(next(u for u in after['units'] if u['id'] == archangel['id'])['casts'], 0)
+        self.assertTrue(any(e['type'] == 'spell' and e['spell'] == 38 for e in result['events']))
+        # Advance native turns to the angel again; its one cast never refills.
+        for _ in range(8):
+            if after['activeStack'] == archangel['id']: break
+            after = self.act(after, 'defend')['state']
+        self.assertEqual(after['activeStack'], archangel['id'])
+        repeat = self.request('act', revision=after['revision'], stack=after['activeStack'], action='creatureSpell', spell=38, targets=[{'unit': pikeman['id']}])
+        self.assertFalse(repeat['ok']); self.assertEqual(self.request('state')['result']['state'], after)
+
+    def test_noncasters_and_undead_targets_cannot_use_archangel_resurrection(self):
+        state = self.create([{'creature': 13, 'count': 1}, {'creature': 56, 'count': 10, 'hex': 90}], [{'creature': 3, 'count': 100, 'hex': 96}])
+        skeleton = next(u for u in state['units'] if u['creature'] == 'core:skeleton')
+        state = self.act(state, 'wait')['state']
+        forbidden = self.request('act', revision=state['revision'], stack=state['activeStack'], action='creatureSpell', spell=38, targets=[{'unit': skeleton['id']}])
+        self.assertFalse(forbidden['ok']); self.assertEqual(self.request('state')['result']['state'], state)
+        state = self.act(state, 'shoot', target=skeleton['id'])['state']
+        targets = self.request('spellTargets', revision=state['revision'], stack=state['activeStack'], spell=38, caster='creature')
+        if targets['ok']: self.assertNotIn([{'unit': skeleton['id']}], targets['result']['targets'])
+        forbidden = self.request('act', revision=state['revision'], stack=state['activeStack'], action='creatureSpell', spell=38, targets=[{'unit': skeleton['id']}])
+        self.assertFalse(forbidden['ok']); self.assertEqual(self.request('state')['result']['state'], state)
+
+
 if __name__ == "__main__":
     unittest.main()

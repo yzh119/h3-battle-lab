@@ -13,7 +13,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div id="unit-tooltip" role="tooltip" hidden></div><div id="stack-labels" aria-label="场上兵力"></div><header><a class="brand" href="https://github.com/yzh119/h3-battle-lab" target="_blank" rel="noreferrer">H3 <span>BATTLE LAB</span></a><div class="top-label">战场实验室 <span>01 / 林地</span></div><div class="live"><i></i> 实时 3D</div></header>
   <aside class="panel"><div class="eyebrow">战场视角</div><h1>走进战场。</h1><p class="intro">换一个角度，看清每一次交锋。</p><select id="unit-picker" aria-label="选择场上单位"><option value="azure">骷髅兵</option><option value="ember">僵尸</option></select>
   <button id="connect-engine">连接引擎</button><p id="engine-status" role="status">正在连接本地引擎…</p><button id="ten-week-armies" disabled>十周城镇产出</button><label class="switch"><span>使用升级兵种</span><input id="preset-upgraded" type="checkbox" checked></label><p class="preset-note">蓝方城堡 · 红方墓园<br>完整城镇，不含圣杯及额外奖励</p><button id="start-battle" disabled>开始对战</button><p id="turn-status" role="status">配置阵容后开始对战</p><div class="button-row"><button id="wait-turn" disabled>等待</button><button id="defend-turn" disabled>防御</button></div><label class="switch"><span>蓝方 VCMI AI</span><input id="ai-blue" type="checkbox"></label><label class="switch"><span>红方 VCMI AI</span><input id="ai-red" type="checkbox"></label><button id="ai-step" disabled>VCMI AI 行动一次</button><p id="turn-queue"></p><label class="switch"><span>射手强制近战</span><input id="force-melee" type="checkbox"></label>
-  <details id="army-editor" open><summary>配置双方阵容</summary><p id="selected-slot-label"></p><label for="creature-picker">兵种</label><select id="creature-picker" aria-label="选择上场兵种"></select><label for="team-picker">阵营</label><select id="team-picker" aria-label="选择上场阵营"><option value="0">蓝方</option><option value="1">红方</option></select><label for="stack-count">每队数量</label><input id="stack-count" aria-label="每队数量" type="number" min="1" max="99999" step="1" value="20"><button id="assign-slot">配置选中格子</button><button id="apply-count" class="quiet">应用数量到选中队伍</button><p id="creature-note"></p><div class="button-row"><button id="add-unit">添加上场</button><button id="replace-unit">替换选中</button></div><button id="remove-unit" class="quiet">移除选中单位</button><p>每方最多 7 队 · 双方均可操控<br>点击队伍格配置兵种与数量；空格也可直接选择</p></details><details id="hero-editor"><summary>英雄与魔法</summary><p>自定义英雄 · 无特长和宝物<br>属性、技能与魔法效果由引擎处理</p><div id="hero-configs"></div></details><details id="spellbook"><summary>战斗魔法</summary><p id="hero-status">英雄参战后可施法</p><select id="spell-picker" aria-label="选择战斗魔法" disabled></select><select id="spell-target" aria-label="选择施法目标" disabled></select><button id="cast-spell" disabled>施放魔法</button><p id="spell-status" role="status"></p></details><details><summary>自定义兵种</summary><p>导入版本 1 的兵种 JSON；VCMI 通过独立 mod 加载机制。自定义模式与原版模式分别标记。</p><input id="creature-import" aria-label="导入自定义兵种 JSON" type="file" accept=".json,application/json"><p id="creature-import-status" role="status"></p></details><div class="section-label">镜头</div><div class="button-row"><button id="overview" class="active">全局</button><button id="closeup">兵种特写</button></div>
+  <details id="army-editor" open><summary>配置双方阵容</summary><p id="selected-slot-label"></p><label for="creature-picker">兵种</label><select id="creature-picker" aria-label="选择上场兵种"></select><label for="team-picker">阵营</label><select id="team-picker" aria-label="选择上场阵营"><option value="0">蓝方</option><option value="1">红方</option></select><label for="stack-count">每队数量</label><input id="stack-count" aria-label="每队数量" type="number" min="1" max="99999" step="1" value="20"><button id="assign-slot">配置选中格子</button><button id="apply-count" class="quiet">应用数量到选中队伍</button><p id="creature-note"></p><div class="button-row"><button id="add-unit">添加上场</button><button id="replace-unit">替换选中</button></div><button id="remove-unit" class="quiet">移除选中单位</button><p>每方最多 7 队 · 双方均可操控<br>点击队伍格配置兵种与数量；空格也可直接选择</p></details><details id="hero-editor"><summary>英雄与魔法</summary><p>自定义英雄 · 无特长和宝物<br>属性、技能与魔法效果由引擎处理</p><div id="hero-configs"></div></details><details id="spellbook"><summary>战斗魔法与兵种能力</summary><select id="spell-caster" aria-label="选择施法者" disabled><option value="hero">英雄魔法</option><option value="creature">兵种能力</option></select><p id="hero-status">英雄参战后可施法</p><select id="spell-picker" aria-label="选择战斗魔法" disabled></select><select id="spell-target" aria-label="选择施法目标" disabled></select><button id="cast-spell" disabled>施放魔法</button><p id="spell-status" role="status"></p></details><details><summary>自定义兵种</summary><p>导入版本 1 的兵种 JSON；VCMI 通过独立 mod 加载机制。自定义模式与原版模式分别标记。</p><input id="creature-import" aria-label="导入自定义兵种 JSON" type="file" accept=".json,application/json"><p id="creature-import-status" role="status"></p></details><div class="section-label">镜头</div><div class="button-row"><button id="overview" class="active">全局</button><button id="closeup">兵种特写</button></div>
   <div class="button-row zoom-controls"><button id="zoom-out" aria-label="缩小战场">− 缩小</button><button id="zoom-in" aria-label="放大战场">＋ 放大</button></div><div class="section-label">场景</div><select id="background-picker" aria-label="战场背景"><option value="">自由 3D 场景</option></select><p id="scene-hint" class="intro">拖动旋转镜头</p><div class="section-label">环境</div><div class="button-row"><button id="day" class="active">暖阳</button><button id="dusk">阴天</button></div>
   <label class="switch"><span>显示六角格</span><input id="grid" type="checkbox" checked></label>
   <label class="switch"><span>实时阴影</span><input id="shadows" type="checkbox" checked></label>
@@ -33,6 +33,7 @@ let views: UnitView[] = [], selected: UnitView, lastEditorSelection: UnitView | 
 let editorTeam = 0, editorSlot = 0;
 let townPreset: TownArmyPreset | undefined;
 let spellTargets: SpellTarget[] = [], spellRequest = 0, spellKey = '';
+let creatureSpellsAvailable = false;
 let heroesAvailable = false, aiAvailable = false, aiTimer: ReturnType<typeof setTimeout> | undefined;
 let deploying = false, deploymentRequest = 0;
 const configured = () => views.map(v => ({ ...v.unit, cell: { ...v.unit.cell } }));
@@ -197,42 +198,52 @@ async function playback(events: EngineEvent[], token: number) {
     if (token !== generation) return; applyState(event.after);
   }
 }
+function clearDeadTargets() { views.forEach(view => view.allowDeadTarget = false); }
 function refreshSpellbook() {
   const actor = state?.units.find(u => u.id === state?.activeStack);
   const hero = actor && state?.heroes?.[controller(actor)!];
   const picker = $<HTMLSelectElement>('#spell-picker'), targets = $<HTMLSelectElement>('#spell-target');
+  const caster = $<HTMLSelectElement>('#spell-caster');
+  caster.disabled = busy || !state || state.winner != null;
+  caster.options[1].disabled = !creatureSpellsAvailable;
+  if (!hero && actor?.spells?.length && creatureSpellsAvailable) caster.value = 'creature';
+  const creature = caster.value === 'creature';
+  const spells = creature ? actor?.spells : hero?.spells;
   const chosen = picker.value;
-  picker.replaceChildren(...(hero?.spells ?? []).map(spell => new Option(`${spell.label} · ${spell.cost} MP${spell.castable ? '' : ' · 当前不可施放'}`, String(spell.id))));
+  picker.replaceChildren(...(spells ?? []).map(spell => new Option(`${spell.label}${!creature && 'cost' in spell ? ` · ${spell.cost} MP` : ''}${spell.castable ? '' : ' · 当前不可施放'}`, String(spell.id))));
   if ([...picker.options].some(option => option.value === chosen)) picker.value = chosen;
-  else { const available = hero?.spells.find(spell => spell.castable); if (available) picker.value = String(available.id); }
-  $('#hero-status').textContent = hero ? `${controller(actor) ? '红方' : '蓝方'}英雄 · 魔力 ${hero.mana}/${hero.maxMana}` : '当前行动方没有参战英雄';
-  const available = hero?.spells.some(spell => String(spell.id) === picker.value && spell.castable);
-  picker.disabled = busy || !hero?.spells.some(spell => spell.castable) || state?.winner != null;
+  else { const available = spells?.find(spell => spell.castable); if (available) picker.value = String(available.id); }
+  $('#hero-status').textContent = creature ? `${actor?.label ?? '当前兵种'} · 能力剩余 ${actor?.casts ?? 0} 次` : hero ? `${controller(actor) ? '红方' : '蓝方'}英雄 · 魔力 ${hero.mana}/${hero.maxMana}` : '当前行动方没有参战英雄';
+  const available = spells?.some(spell => String(spell.id) === picker.value && spell.castable);
+  picker.disabled = busy || !spells?.some(spell => spell.castable) || state?.winner != null;
   $<HTMLButtonElement>('#cast-spell').disabled = busy || !available || !spellTargets.length || state?.winner != null;
   targets.disabled = busy || !available || !spellTargets.length;
-  if (!available || !state || state.winner != null) { ++spellRequest; spellKey = ''; spellTargets = []; targets.replaceChildren(); return; }
-  const key = `${state.revision}:${picker.value}`;
+  if (!available || !state || state.winner != null) { ++spellRequest; spellKey = ''; spellTargets = []; targets.replaceChildren(); clearDeadTargets(); $('#spell-status').textContent = creature ? '当前兵种没有可用的主动能力。' : '当前没有可施放的英雄魔法。'; return; }
+  const key = `${state.revision}:${caster.value}:${picker.value}`;
   if (!busy && key !== spellKey) void loadSpellTargets();
 }
 async function loadSpellTargets() {
   if (!state || busy) return;
   const picker = $<HTMLSelectElement>('#spell-picker'), request = ++spellRequest, current = state;
-  spellKey = `${current.revision}:${picker.value}`; spellTargets = []; $<HTMLButtonElement>('#cast-spell').disabled = true;
+  const caster = $<HTMLSelectElement>('#spell-caster').value as 'hero' | 'creature';
+  spellKey = `${current.revision}:${caster}:${picker.value}`; spellTargets = []; clearDeadTargets(); $<HTMLButtonElement>('#cast-spell').disabled = true;
   $('#spell-status').textContent = '正在读取合法目标…';
   try {
-    const result = await engine.spellTargets(current, Number(picker.value));
+    const result = await engine.spellTargets(current, Number(picker.value), caster);
     if (request !== spellRequest || state?.revision !== current.revision || busy) return;
     spellTargets = result.targets;
+    for (const view of views) { const id = nativeUnits.get(view.unit.id)?.id; view.allowDeadTarget = spellTargets.some(target => target.some(destination => destination.unit === id)); }
     $<HTMLSelectElement>('#spell-target').replaceChildren(...spellTargets.map((target, i) => new Option(spellTargetLabel(target, state!.units), String(i))));
     $<HTMLSelectElement>('#spell-target').disabled = !spellTargets.length;
     $<HTMLButtonElement>('#cast-spell').disabled = !spellTargets.length;
     $('#spell-status').textContent = spellTargets.length ? '选择目标，或点击场上的单位／格子。' : '当前没有合法施法目标';
   } catch (error) { if (request === spellRequest) $('#spell-status').textContent = error instanceof Error ? error.message : String(error); }
 }
+$('#spell-caster').onchange = () => { spellKey = ''; refreshSpellbook(); };
 $('#spell-picker').onchange = () => void loadSpellTargets();
 $('#cast-spell').onclick = () => {
   const targets = spellTargets[Number($<HTMLSelectElement>('#spell-target').value)];
-  if (targets) void action('spell', { spell: Number($<HTMLSelectElement>('#spell-picker').value), targets });
+  if (targets) void action($<HTMLSelectElement>('#spell-caster').value === 'creature' ? 'creatureSpell' : 'spell', { spell: Number($<HTMLSelectElement>('#spell-picker').value), targets });
 };
 function chooseSpellTarget(unit?: NativeUnit, hex?: number) {
   if (!$('#spellbook').hasAttribute('open') || !spellTargets.length) return false;
@@ -290,6 +301,7 @@ async function previewDeployment() {
 function readCatalogue(info: EngineCatalogue) {
   nativeCreatures.clear(); info.creatures.forEach(c => nativeCreatures.set(c.key, c));
   customPacksAvailable = info.customPacks;
+  creatureSpellsAvailable = info.creatureSpells === true;
   customArt = info.creatures.filter(c => c.custom && c.art).map(c => ({ id: c.id, key: c.key, art: c.art!, label: c.label, faction: c.faction ?? '自定义' }));
   connected = info.backend === 'vcmi-native' && creatureArt.every(c => nativeCreatures.has(c.key));
   $('#engine-status').textContent = connected ? `VCMI 已连接 · ${info.rulesProfile === 'custom-reference' ? '自定义模式' : '原版参考模式'} · ${info.creatures.length} 种兵种` : '引擎兵种目录不完整';
@@ -444,5 +456,5 @@ async function boot() {
 }
 world.renderer.setAnimationLoop(() => { clock.update(); const dt = Math.min(clock.getDelta(), .05); views.forEach(v => v.update(dt, v === selected)); if (world.controls.enabled) world.controls.update(); world.renderer.render(world.scene, world.camera);
   const rect = canvas.getBoundingClientRect(); for (const view of views) { const badge = badges.get(view.unit.id); if (!badge) continue; const point = view.root.position.clone().add(new THREE.Vector3(0, .15, 0)).project(world.camera); badge.hidden = view.unit.hp <= 0 || Math.abs(point.z) > 1; badge.textContent = String(count(view)); badge.style.left = `${rect.left + (point.x + 1) * rect.width / 2}px`; badge.style.top = `${rect.top + (1 - point.y) * rect.height / 2}px`; } });
-Object.assign(window, { battleLab: { snapshot: () => ({ connected, busy, deploying, projectiles, state, backdrop: world.isBackdrop(), canvas: canvas.getBoundingClientRect().toJSON(), grid: world.grid.visible, draws: world.renderer.info.render.calls, units: views.map(v => ({ ...v.unit, count: count(v), native: nativeUnits.get(v.unit.id), imported: v.imported, animation: v.current, clips: v.clips.map(c => c.name), pose: v.poseSignature() })) }), move, attack: () => { const target = views.find(v => controller(nativeUnits.get(v.unit.id)) !== controller(nativeUnits.get(viewFor(state?.activeStack ?? -1)?.unit.id ?? ''))); return target ? attack(target) : Promise.resolve(); } } });
+Object.assign(window, { battleLab: { snapshot: () => ({ connected, busy, deploying, projectiles, state, backdrop: world.isBackdrop(), canvas: canvas.getBoundingClientRect().toJSON(), grid: world.grid.visible, draws: world.renderer.info.render.calls, units: views.map(v => ({ ...v.unit, count: count(v), native: nativeUnits.get(v.unit.id), imported: v.imported, animation: v.current, clips: v.clips.map(c => c.name), pose: v.poseSignature() })) }), move, attack: (targetId?: number) => { const target = targetId !== undefined ? viewFor(targetId) : views.find(v => controller(nativeUnits.get(v.unit.id)) !== controller(nativeUnits.get(viewFor(state?.activeStack ?? -1)?.unit.id ?? ''))); return target ? attack(target) : Promise.resolve(); } } });
 void boot();
