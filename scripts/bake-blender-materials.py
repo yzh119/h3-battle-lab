@@ -11,10 +11,18 @@ import sys
 from pathlib import Path
 
 
-def procedural(mat):
+def surface_shader(mat):
     if not mat or not mat.use_nodes:
-        return False
-    shader = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+        return None
+    output = next((n for n in mat.node_tree.nodes if n.type == 'OUTPUT_MATERIAL' and n.is_active_output), None)
+    if not output or not output.inputs['Surface'].is_linked:
+        return None
+    shader = output.inputs['Surface'].links[0].from_node
+    return shader if shader.type == 'BSDF_PRINCIPLED' else None
+
+
+def procedural(mat):
+    shader = surface_shader(mat)
     color = shader.inputs['Base Color'] if shader else None
     return bool(color and color.is_linked and color.links[0].from_node.type != 'TEX_IMAGE')
 
@@ -24,7 +32,9 @@ def apply_texture(obj, image, indices):
     for index in indices:
         mat = obj.material_slots[index].material.copy()
         obj.material_slots[index].material = mat
-        shader = next(n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
+        shader = surface_shader(mat)
+        if not shader:
+            raise ValueError('Baking requires a Principled surface: ' + mat.name)
         color = shader.inputs['Base Color']
         for link in list(color.links):
             mat.node_tree.links.remove(link)
@@ -55,7 +65,9 @@ def bake_object(obj, path, resolution):
         mat = slot.material.copy()
         slot.material = mat
         tree = mat.node_tree
-        shader = next(n for n in tree.nodes if n.type == 'BSDF_PRINCIPLED')
+        shader = surface_shader(mat)
+        if not shader:
+            raise ValueError('Baking requires a Principled surface: ' + mat.name)
         output = next(n for n in tree.nodes if n.type == 'OUTPUT_MATERIAL' and n.is_active_output)
         original = output.inputs['Surface'].links[0].from_socket
         emission = tree.nodes.new('ShaderNodeEmission')
