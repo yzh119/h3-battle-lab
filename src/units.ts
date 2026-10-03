@@ -40,6 +40,8 @@ export class UnitView {
   private animationTime = 0;
   private remaining = 0;
   imported = false;
+  playbackHp?: number;
+  get displayedHp(): number { return this.playbackHp ?? this.unit.hp; }
   private assetRevision = 0;
   private disposed = false;
   poseSignature(): string {
@@ -98,6 +100,8 @@ export class UnitView {
   }
   play(name: string, once = false): number {
     this.current = name; this.animationTime = 0;
+    const requested = name;
+    if (name === 'shoot' && !this.clips.some(c => c.name.toLowerCase().includes('shoot'))) name = 'attack';
     const clip = this.clips.find(c => c.name.toLowerCase() === name)
       ?? this.clips.find(c => c.name.toLowerCase().includes(name));
     if (clip && this.mixer) {
@@ -109,6 +113,7 @@ export class UnitView {
       this.remaining = once && name !== 'death' ? clip.duration : 0;
       return clip.duration;
     }
+    this.current = requested;
     this.remaining = once && name !== 'death' ? 1.1 : 0;
     return 1.1;
   }
@@ -118,10 +123,10 @@ export class UnitView {
     if (this.dummy) {
       const stride = this.current === 'walk' ? Math.sin(this.animationTime * 8) * .5 : 0;
       this.dummy.legs.forEach((leg, i) => { leg.rotation.x = stride * (i ? -1 : 1); });
-      this.dummy.arms.forEach((arm, i) => { arm.rotation.x = this.current === 'attack' ? -Math.sin(Math.min(this.animationTime / 1.1, 1) * Math.PI) * 1.9 : -stride * (i ? -1 : 1); });
+      this.dummy.arms.forEach((arm, i) => { arm.rotation.x = ['attack', 'shoot'].includes(this.current) ? -Math.sin(Math.min(this.animationTime / 1.1, 1) * Math.PI) * 1.9 : -stride * (i ? -1 : 1); });
       this.model.rotation.z = this.current === 'death' ? -Math.PI / 2 : 0;
     }
     this.ring.material.opacity = selected ? .8 + .18 * Math.sin(performance.now() / 350) : .35;
-    this.proxy.visible = this.unit.hp > 0; this.ring.visible = this.unit.hp > 0;
+    this.proxy.visible = this.displayedHp > 0; this.ring.visible = this.displayedHp > 0;
   }
 }

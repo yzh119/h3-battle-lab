@@ -1,6 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cellAt, cells, distance, neighbors, pathfind, key, initialUnits, occupied, strike, stackCount, topHealth, setStackCount, damageRange } from '../src/battle.ts';
+import { cellAt, cells, distance, isPlayable, neighbors, pathfind, key, initialUnits, occupied, strike, stackCount, topHealth, setStackCount, damageRange } from '../src/battle.ts';
+
+test('offset rows align with native hex IDs and hero columns cannot be occupied', () => {
+  assert.equal(distance(cellAt(5, 5), cellAt(4, 4)), 1);
+  assert.equal(distance(cellAt(5, 5), cellAt(6, 4)), 2);
+  assert.equal(distance(cellAt(5, 4), cellAt(6, 5)), 1);
+  assert.equal(distance(cellAt(5, 4), cellAt(4, 5)), 2);
+  assert.equal(cells.filter(isPlayable).length, 165);
+  for (let row = 0; row < 11; row++) {
+    for (const col of [0, 16]) {
+      const reserved = cellAt(col, row);
+      assert.equal(isPlayable(reserved), false);
+      assert.equal(pathfind(cellAt(1, row), reserved, new Set()), null);
+      assert.deepEqual(neighbors(reserved), []);
+    }
+  }
+});
 
 test('hex neighbors have unit distance, stay on the board and are reciprocal', () => {
   for (const cell of cells) for (const next of neighbors(cell)) {
@@ -177,4 +193,77 @@ test('custom retaliation allowance and regeneration work independently of creatu
   assert.deepEqual(battle.melee('c', 'b', () => 0)!.map(h => h.counter), [false, true]);
   const before = b.hp; battle.defend('b');
   assert.equal(b.hp, before + Math.min(3, 24 - topHealth({ ...b, hp: before })));
+});
+
+test('ranged damage halves beyond ten hexes and shooter melee applies only the melee penalty', () => {
+  const a = troop('a', 'archer', 0, 3, 10), b = troop('b', 'skeleton', 1, 13, 100);
+  assert.deepEqual(damageRange(a, b, 4, { ranged: true }), { min: 22, max: 33 });
+  b.cell = cellAt(14, 5);
+  assert.deepEqual(damageRange(a, b, 4, { ranged: true }), { min: 11, max: 16 });
+  b.cell = cellAt(4, 5);
+  assert.deepEqual(damageRange(a, b), { min: 11, max: 16 });
+  a.kind = 'monk'; setStackCount(a, 10);
+  assert.deepEqual(damageRange(a, b), { min: 70, max: 84 });
+  a.kind = 'zealot'; setStackCount(a, 10);
+  assert.deepEqual(damageRange(a, b), { min: 140, max: 168 });
+});
+test('Marksman double shots consume two arrows, keep position, trigger no retaliation and refresh no ammo on new round', () => {
+  const a = troop('a', 'marksman', 0, 3), b = troop('b', 'zombie', 1, 11, 100), battle = new Battle([a, b]);
+  assert.equal(battle.shots('a'), 24); assert.ok(battle.canShoot('a', 'b'));
+  const hits = battle.shoot('a', 'b', () => 0)!;
+  assert.equal(hits.length, 2); assert.ok(hits.every(h => h.ranged && !h.counter));
+  assert.deepEqual(a.cell, cellAt(3, 5)); assert.equal(a.hp, 200); assert.equal(battle.shots('a'), 22);
+  assert.equal(battle.activeId, 'b'); assert.equal(battle.shoot('a', 'b'), null);
+  battle.defend('b'); assert.equal(battle.round, 2); assert.equal(battle.shots('a'), 22);
+  assert.equal(new Battle([structuredClone(a), structuredClone(b)]).shots('a'), 24);
+});
+test('any adjacent enemy blocks shooting, friendly neighbors do not, and Marksmen never double strike in melee', () => {
+  const a = troop('a', 'marksman', 0, 5, 20), b = troop('b', 'zombie', 1, 11, 100), friend = troop('f', 'skeleton', 0, 4);
+  const battle = new Battle([a, b, friend]);
+  assert.ok(battle.canShoot('a', 'b'));
+  b.cell = cellAt(6, 5);
+  assert.equal(battle.canShoot('a', 'b'), false); assert.equal(battle.shoot('a', 'b'), null);
+  assert.equal(battle.shots('a'), 24); assert.equal(battle.activeId, 'a');
+  assert.equal(battle.melee('a', 'b', () => 0)!.filter(h => !h.counter).length, 1);
+  assert.equal(battle.shots('a'), 24);
+});
+test('custom shooter with one arrow stops extra shots when out of ammo, then can only melee', () => {
+  const pack = customPack(), def = pack.creatures[0]; def.id = 'custom-one-arrow';
+  def.mechanisms = [{ type: 'shooter', shots: 1, noDistancePenalty: true }, { type: 'additionalAttacks', count: 2, mode: 'ranged' }];
+  registerCreaturePack(pack);
+  const a = troop('a', def.id, 0, 3, 10), b = troop('b', 'zombie', 1, 14, 100), battle = new Battle([a, b]);
+  const full = damageRange(a, b, 5, { ranged: true }); assert.deepEqual(full, { min: 48, max: 72 });
+  assert.equal(battle.shoot('a', 'b', () => 0)!.length, 1); assert.equal(battle.shots('a'), 0);
+  battle.defend('b'); assert.equal(battle.canShoot('a', 'b'), false); assert.equal(battle.shoot('a', 'b'), null);
+  b.cell = cellAt(4, 5); assert.ok(battle.melee('a', 'b', () => 0));
+});
+test('lethal first arrow cancels Marksman second shot', () => {
+  const a = troop('a', 'marksman', 0, 3, 100), b = troop('b', 'zombie', 1, 11, 1), battle = new Battle([a, b]);
+  assert.equal(battle.shoot('a', 'b', () => 0)!.length, 1);
+  assert.equal(battle.shots('a'), 23); assert.equal(battle.winner, 0);
+});
+test('death cloud hits living troops of either side, spares adjacent undead, and directly damages undead target', () => {
+  const a = troop('a', 'lich', 0, 3, 20), b = troop('b', 'skeleton', 1, 11, 100);
+  const livingEnemy = troop('e', 'swordsman', 1, 12, 100), livingFriend = troop('f', 'swordsman', 0, 10, 100);
+  const undeadFriend = { ...troop('u', 'zombie', 0, 12), cell: neighbors(b.cell).find(c => c.r !== 5)! };
+  const battle = new Battle([a, b, livingEnemy, livingFriend, undeadFriend]);
+  const hits = battle.shoot('a', 'b', () => 0)!;
+  assert.deepEqual(hits.map(h => h.defender), ['b', 'e', 'f']);
+  assert.deepEqual(hits.map(h => h.secondary), [false, true, true]);
+  assert.ok(b.hp < 600); assert.ok(livingFriend.hp < 3500); assert.equal(undeadFriend.hp, 300);
+  assert.equal(battle.shots('a'), 11); assert.ok(hits.every(h => !h.counter));
+});
+test('cloud selects adjacent victims before lethal primary damage, but does not apply in melee', () => {
+  const a = troop('a', 'lich', 0, 3, 100), b = troop('b', 'skeleton', 1, 11, 1), c = troop('c', 'swordsman', 1, 12, 100);
+  const battle = new Battle([a, b, c]);
+  assert.equal(battle.shoot('a', 'b', () => 0)!.length, 2); assert.ok(c.hp < 3500);
+  const x = troop('x', 'lich', 0, 5, 100), y = troop('y', 'skeleton', 1, 6, 1), z = troop('z', 'swordsman', 1, 7, 100);
+  assert.equal(new Battle([x, y, z]).melee('x', 'y', () => 0)!.length, 1); assert.equal(z.hp, 3500);
+});
+test('ranged pack mechanisms validate modes, flags and required shooter without altering registered rules', () => {
+  for (const mechanisms of [
+    [{ type: 'shooter', shots: 0 }], [{ type: 'shooter', shots: 12, noMeleePenalty: 'yes' }],
+    [{ type: 'additionalAttacks', count: 1, mode: 'invalid' }], [{ type: 'additionalAttacks', count: 1, mode: 'ranged' }],
+    [{ type: 'deathCloud' }], [{ type: 'undead', bonus: 3 }],
+  ]) { const pack = customPack(); pack.creatures[0].mechanisms = mechanisms; assert.throws(() => parseCreaturePack(pack)); }
 });

@@ -156,7 +156,7 @@ test('stack editor validates numbers, labels quantities and resets wounded stack
   await page.locator('#stack-count').fill('9'); await page.locator('#apply-count').click();
   await page.locator('#reset').click();
   const unit = await page.evaluate(() => (window as any).battleLab.snapshot().units[0]);
-  expect(unit.count).toBe(9); expect(unit.cell).toEqual({ q: 3, r: 5 });
+  expect(unit.count).toBe(9); expect(unit.cell).toEqual({ q: 2, r: 5 });
 });
 
 test('custom creature packs import, reject bad mechanisms, and fight without artwork', async ({ page }) => {
@@ -194,4 +194,65 @@ test('local creature data autoloads without an art manifest', async ({ page }) =
   await expect.poll(() => page.evaluate(() => (window as any).battleLab.snapshot().units[0].kind)).toBe('custom-spectral-guard');
   expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[0].imported)).toBe(false);
   await expect(page.locator('#creature-picker option:checked')).toContainText('自定义');
+});
+
+test('Marksman renders two shots, updates HP at impact, consumes arrows and resets ammo', async ({ page }) => {
+  await page.route('**/local-assets/**', route => route.fulfill({ status: 404, body: '' }));
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/'); await expect(page.locator('#loading')).toBeHidden();
+  await page.locator('#creature-picker').selectOption('marksman'); await page.locator('#replace-unit').click();
+  await page.locator('#start-battle').click();
+  await expect(page.locator('#hp')).toContainText('弹药 24');
+  await page.evaluate(() => { (window as any).pendingShot = (window as any).battleLab.attack(); });
+  await page.waitForFunction(() => {
+    const state = (window as any).battleLab.snapshot();
+    return state.projectiles > 0 && state.units[1].displayedHp === 300 && state.units[1].hp < 300;
+  });
+  await page.screenshot({ path: '.local/marksman-projectile-fallback.png' });
+  await page.evaluate(() => (window as any).pendingShot);
+  let state = await page.evaluate(() => (window as any).battleLab.snapshot());
+  expect(state.units[0].shots).toBe(22); expect(state.units[0].hp).toBe(200);
+  expect(state.units[0].cell).toEqual({ q: 2, r: 5 });
+  expect(state.units[1].hp).toBeGreaterThanOrEqual(174); expect(state.units[1].hp).toBeLessThanOrEqual(216);
+  expect(state.units[1].displayedHp).toBe(state.units[1].hp); expect(state.projectiles).toBe(0);
+  await expect(page.locator('#combat-log p')).toHaveCount(2); await expect(page.locator('#combat-log')).toContainText('射击');
+  await expect(page.locator('#combat-log')).not.toContainText('反击');
+  await page.locator('#reset').click(); await page.locator('#start-battle').click();
+  state = await page.evaluate(() => (window as any).battleLab.snapshot()); expect(state.units[0].shots).toBe(24);
+  expect(errors).toEqual([]);
+});
+
+test('forced melee uses speed-limited approach and does not consume shooter ammo or ranged double attack', async ({ page }) => {
+  await page.route('**/local-assets/**', route => route.fulfill({ status: 404, body: '' }));
+  await page.goto('/'); await expect(page.locator('#loading')).toBeHidden();
+  await page.locator('#creature-picker').selectOption('marksman'); await page.locator('#replace-unit').click();
+  await page.locator('#force-melee').check(); await page.locator('#start-battle').click();
+  await page.evaluate(() => (window as any).battleLab.attack());
+  const state = await page.evaluate(() => (window as any).battleLab.snapshot());
+  expect(state.units[0].shots).toBe(24); expect(state.units[0].cell).not.toEqual({ q: 2, r: 5 });
+  expect(state.units[0].hp).toBeLessThan(200);
+  await expect(page.locator('#combat-log p')).toHaveCount(2); // one melee and retaliation
+  await expect(page.locator('#combat-log')).toContainText('反击'); await expect(page.locator('#combat-log')).not.toContainText('射击');
+});
+
+for (const kind of ['archer', 'marksman']) test(`local ${kind} export plays its real shooting animation when available`, async ({ page, request }) => {
+  const response = await request.get('/local-assets/manifest.json');
+  test.skip(!response.headers()['content-type']?.includes('json'), 'Private art absent');
+  const manifest = await response.json(); test.skip(!manifest.units?.[kind], `${kind} art absent`);
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/'); await expect(page.locator('#loading')).toBeHidden({ timeout: 60000 });
+  await page.locator('#creature-picker').selectOption(kind); await page.locator('#replace-unit').click();
+  await expect.poll(() => page.evaluate(k => (window as any).battleLab.snapshot().units.some((u: any) => u.kind === k && u.imported), kind), { timeout: 60000 }).toBe(true);
+  const unit = await page.evaluate(() => (window as any).battleLab.snapshot().units[0]);
+  expect(unit.clips).toEqual(expect.arrayContaining(['idle', 'walk', 'attack', 'hit', 'death', 'shoot']));
+  await page.locator('#start-battle').click();
+  await page.evaluate(() => { (window as any).pendingShot = (window as any).battleLab.attack(); });
+  await page.waitForFunction(() => (window as any).battleLab.snapshot().units[0].animation === 'shoot');
+  const pose = await page.evaluate(() => (window as any).battleLab.snapshot().units[0].pose);
+  await expect.poll(() => page.evaluate(() => (window as any).battleLab.snapshot().units[0].pose)).not.toBe(pose);
+  await page.evaluate(() => (window as any).pendingShot);
+  expect(await page.evaluate(() => (window as any).battleLab.snapshot().units[0].shots)).toBe(kind === 'archer' ? 11 : 22);
+  await page.getByRole('button', { name: '兵种特写' }).click();
+  await page.screenshot({ path: `.local/${kind}-ranged-local.png` });
+  expect(errors).toEqual([]);
 });

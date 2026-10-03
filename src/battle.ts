@@ -4,11 +4,17 @@ export interface Unit { id: string; label: string; kind: string; team: number; c
 export const COLS = 17;
 export const ROWS = 11;
 export const key = (h: Hex) => `${h.q},${h.r}`;
-export const cellAt = (col: number, row: number): Hex => ({ q: col - Math.floor(row / 2), r: row });
+export const cellAt = (col: number, row: number): Hex => ({ q: col - Math.ceil(row / 2), r: row });
 export const cells: Hex[] = Array.from({ length: COLS * ROWS }, (_, i) => cellAt(i % COLS, Math.floor(i / COLS)));
-const valid = new Set(cells.map(key));
+// The two outer columns are reserved for heroes, not creature movement.
+const valid = new Set(cells.filter(h => {
+  const col = h.q + Math.ceil(h.r / 2);
+  return col > 0 && col < COLS - 1;
+}).map(key));
+export const isPlayable = (h: Hex): boolean => valid.has(key(h));
 const directions = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
 export function neighbors(h: Hex): Hex[] {
+  if (!isPlayable(h)) return [];
   return directions.map(([q, r]) => ({ q: h.q + q, r: h.r + r })).filter(c => valid.has(key(c)));
 }
 export function distance(a: Hex, b: Hex): number {
@@ -54,20 +60,26 @@ export function occupied(units: Unit[], except: string): Set<string> {
   return new Set([...obstacles, ...units.filter(u => u.id !== except && u.hp > 0).map(u => key(u.cell))]);
 }
 export interface DamageRange { min: number; max: number }
-// Unmodified single melee blow only: no heroes, spells, abilities or retaliation yet.
+export interface DamageOptions { ranged?: boolean }
+// Single-blow damage; turn, retaliation and ammunition are controlled by Battle.
 // VCMI base config: +5% per surplus attack (cap +300%), -2.5% per
 // surplus defense (cap -70%). Integer ratios avoid floating point off-by-one damage.
-export function damageRange(attacker: Unit, defender: Unit, defense = stats(defender).defense): DamageRange {
+export function damageRange(attacker: Unit, defender: Unit, defense = stats(defender).defense, options: DamageOptions = {}): DamageRange {
   if (attacker.hp <= 0 || defender.hp <= 0) return { min: 0, max: 0 };
   const a = stats(attacker), delta = a.attack - defense;
   const factor = delta >= 0 ? 1000 + Math.min(delta * 50, 3000) : 1000 - Math.min(-delta * 25, 700);
-  const count = stackCount(attacker);
-  return { min: Math.max(1, Math.floor(count * a.minDamage * factor / 1000)), max: Math.max(1, Math.floor(count * a.maxDamage * factor / 1000)) };
+  const count = stackCount(attacker), shooter = mechanism(attacker.kind, 'shooter');
+  const penalty = options.ranged ? !shooter?.noDistancePenalty && distance(attacker.cell, defender.cell) > 10 : shooter && !shooter.noMeleePenalty;
+  const divisor = penalty ? 2000 : 1000;
+  return { min: Math.max(1, Math.floor(count * a.minDamage * factor / divisor)), max: Math.max(1, Math.floor(count * a.maxDamage * factor / divisor)) };
 }
 export interface StrikeResult { damage: number; killed: number; remaining: number; range: DamageRange }
 export function strike(attacker: Unit, defender: Unit, random = Math.random, defense = stats(defender).defense): StrikeResult | null {
   if (attacker.hp <= 0 || defender.hp <= 0 || attacker.team === defender.team || distance(attacker.cell, defender.cell) !== 1) return null;
-  const range = damageRange(attacker, defender, defense);
+  return dealDamage(attacker, defender, random, defense);
+}
+function dealDamage(attacker: Unit, defender: Unit, random: () => number, defense: number, options: DamageOptions = {}): StrikeResult {
+  const range = damageRange(attacker, defender, defense, options);
   // VCMI BattleInfo::getActualDamage averages min(10, count) inclusive rolls.
   const samples = Math.min(10, stackCount(attacker)); let total = 0;
   for (let i = 0; i < samples; i++) {
@@ -92,7 +104,7 @@ export function approachPath(unit: Unit, target: Unit, units: Unit[]): Hex[] | n
   return neighbors(target.cell).map(c => movementPath(unit, c, units)).filter((p): p is Hex[] => p !== null)
     .sort((a, b) => (flying(unit) ? distance(unit.cell, a.at(-1) ?? unit.cell) - distance(unit.cell, b.at(-1) ?? unit.cell) : a.length - b.length))[0] ?? null;
 }
-export interface CombatBlow extends StrikeResult { attacker: string; defender: string; counter: boolean }
+export interface CombatBlow extends StrikeResult { attacker: string; defender: string; counter: boolean; ranged: boolean; secondary: boolean; attackIndex: number; healthAfter: number }
 interface TurnState { acted: boolean; waited: boolean; retaliated: number; defending: boolean }
 const freshTurn = (): TurnState => ({ acted: false, waited: false, retaliated: 0, defending: false });
 
@@ -103,18 +115,44 @@ export class Battle {
   winner: number | null = null;
   private lastTeam: number | null = null;
   private turns = new Map<string, TurnState>();
+  private ammunition = new Map<string, number>();
   readonly units: Unit[];
   constructor(units: Unit[]) {
     this.units = units;
     if (new Set(units.map(u => u.id)).size !== units.length || units.some(u => u.hp <= 0 || !valid.has(key(u.cell)))) throw new Error('Invalid army');
     if (new Set(units.map(u => key(u.cell))).size !== units.length || units.some(u => obstacles.has(key(u.cell)))) throw new Error('Occupied deployment');
     if (![0, 1].every(team => units.some(u => u.team === team)) || units.some(u => ![0, 1].includes(u.team))) throw new Error('Both teams required');
-    for (const u of units) { stats(u); this.turns.set(u.id, freshTurn()); }
+    for (const u of units) { stats(u); this.turns.set(u.id, freshTurn()); this.ammunition.set(u.id, mechanism(u.kind, 'shooter')?.shots ?? 0); }
     this.regenerate(); this.advance();
   }
   get active(): Unit | undefined { return this.units.find(u => u.id === this.activeId); }
   canAct(id: string): boolean { return this.winner === null && this.activeId === id; }
   canWait(id: string): boolean { return this.canAct(id) && !this.turns.get(id)!.waited; }
+  shots(id: string): number { return this.ammunition.get(id) ?? 0; }
+  canShoot(id: string, targetId: string): boolean {
+    const unit = this.units.find(u => u.id === id), target = this.units.find(u => u.id === targetId);
+    return !!unit && !!target && this.canAct(id) && this.shots(id) > 0 && target.hp > 0 && target.team !== unit.team &&
+      !this.units.some(other => other.hp > 0 && other.team !== unit.team && distance(unit.cell, other.cell) === 1);
+  }
+  private attacks(unit: Unit, mode: 'melee' | 'ranged'): number {
+    const extra = mechanism(unit.kind, 'additionalAttacks');
+    return 1 + (extra && ((extra.mode ?? 'melee') === mode || extra.mode === 'both') ? extra.count : 0);
+  }
+  shoot(id: string, targetId: string, random = Math.random): CombatBlow[] | null {
+    if (!this.canShoot(id, targetId)) return null;
+    const attacker = this.active!, defender = this.units.find(u => u.id === targetId)!;
+    const blows: CombatBlow[] = [];
+    for (let i = 0; i < this.attacks(attacker, 'ranged') && defender.hp > 0 && this.shots(id) > 0; i++) {
+      // Determine the affected set before the primary blow can kill its target.
+      const targets = [defender, ...(!mechanism(attacker.kind, 'deathCloud') ? [] : this.units.filter(u => u !== defender && u.hp > 0 && distance(u.cell, defender.cell) === 1 && !mechanism(u.kind, 'undead')))];
+      this.ammunition.set(id, this.shots(id) - 1);
+      for (const target of targets) {
+        const result = dealDamage(attacker, target, random, this.defense(target), { ranged: true });
+        blows.push({ ...result, attacker: id, defender: target.id, counter: false, ranged: true, secondary: target !== defender, attackIndex: i, healthAfter: target.hp });
+      }
+    }
+    this.finish(attacker); return blows;
+  }
   defense(unit: Unit): number {
     const base = stats(unit).defense;
     return base + (this.turns.get(unit.id)!.defending ? Math.max(1, Math.floor(base / 5)) : 0);
@@ -179,10 +217,10 @@ export class Battle {
     const blows: CombatBlow[] = [];
     const blow = (a: Unit, d: Unit, counter: boolean) => {
       const result = strike(a, d, random, this.defense(d));
-      if (result) blows.push({ ...result, attacker: a.id, defender: d.id, counter });
+      if (result) blows.push({ ...result, attacker: a.id, defender: d.id, counter, ranged: false, secondary: false, attackIndex: blows.filter(b => !b.counter).length, healthAfter: d.hp });
     };
     const state = this.turns.get(defender.id)!;
-    const attacks = 1 + (mechanism(attacker.kind, 'additionalAttacks')?.count ?? 0);
+    const attacks = this.attacks(attacker, 'melee');
     for (let i = 0; i < attacks && attacker.hp > 0 && defender.hp > 0; i++) {
       blow(attacker, defender, false);
       if (i === 0 && attacker.hp > 0 && defender.hp > 0 && !mechanism(attacker.kind, 'blocksRetaliation') && state.retaliated < (mechanism(defender.kind, 'retaliations')?.count ?? 1)) {

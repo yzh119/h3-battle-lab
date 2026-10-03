@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { cells, key, obstacles, type Hex } from './battle.ts';
+import { cells, isPlayable, key, obstacles, type Hex } from './battle.ts';
 
 export const RADIUS = 1.18;
 export function worldPosition(h: Hex): THREE.Vector3 {
-  return new THREE.Vector3(Math.sqrt(3) * RADIUS * (h.q + h.r / 2 - 8.25), 0, 1.5 * RADIUS * (h.r - 5));
+  return new THREE.Vector3(Math.sqrt(3) * RADIUS * (h.q + h.r / 2 - 7.75), 0, 1.5 * RADIUS * (h.r - 5));
 }
 function random(seed: number) { let n = seed; return () => { n = (Math.imul(n, 1664525) + 1013904223) >>> 0; return n / 4294967296; }; }
 
@@ -49,7 +49,7 @@ export function createWorld(canvas: HTMLCanvasElement) {
   for (const cell of cells) {
     const p = worldPosition(cell);
     const mesh = new THREE.Mesh(tile, new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }));
-    mesh.position.copy(p); mesh.position.y = .02; mesh.userData.cell = cell; scene.add(mesh); pickable.push(mesh);
+    mesh.position.copy(p); mesh.position.y = .02; mesh.userData.cell = cell; scene.add(mesh); if (isPlayable(cell)) pickable.push(mesh);
     const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: '#d8d8b1', transparent: true, opacity: .16 })); line.position.copy(p); grid.add(line);
   }
   scene.add(grid); grid.visible = false;

@@ -92,7 +92,7 @@
           },
           "mechanisms": {
             "type": "array",
-            "maxItems": 5,
+            "maxItems": 8,
             "items": {
               "oneOf": [
                 {
@@ -122,6 +122,13 @@
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 4
+                    },
+                    "mode": {
+                      "enum": [
+                        "melee",
+                        "ranged",
+                        "both"
+                      ]
                     }
                   }
                 },
@@ -172,13 +179,259 @@
                       "const": "blocksRetaliation"
                     }
                   }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "shots"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "shooter"
+                    },
+                    "shots": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1000
+                    },
+                    "noMeleePenalty": {
+                      "type": "boolean"
+                    },
+                    "noDistancePenalty": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "undead"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "deathCloud"
+                    }
+                  }
                 }
               ]
             }
           }
-        }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "mechanisms": {
+                "contains": {
+                  "properties": {
+                    "type": {
+                      "const": "flying"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "minContains": 0,
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "mechanisms": {
+                "contains": {
+                  "properties": {
+                    "type": {
+                      "const": "additionalAttacks"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "minContains": 0,
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "mechanisms": {
+                "contains": {
+                  "properties": {
+                    "type": {
+                      "const": "regeneration"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "minContains": 0,
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "mechanisms": {
+                "contains": {
+                  "properties": {
+                    "type": {
+                      "const": "retaliations"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "minContains": 0,
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "mechanisms": {
+                "contains": {
+                  "properties": {
+                    "type": {
+                      "const": "blocksRetaliation"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "minContains": 0,
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "mechanisms": {
+                "contains": {
+                  "properties": {
+                    "type": {
+                      "const": "shooter"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "minContains": 0,
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "mechanisms": {
+                "contains": {
+                  "properties": {
+                    "type": {
+                      "const": "undead"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "minContains": 0,
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "mechanisms": {
+                "contains": {
+                  "properties": {
+                    "type": {
+                      "const": "deathCloud"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "minContains": 0,
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "mechanisms": {
+                  "contains": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "type": {
+                            "const": "deathCloud"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      {
+                        "properties": {
+                          "type": {
+                            "const": "additionalAttacks"
+                          },
+                          "mode": {
+                            "const": "ranged"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "mode"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "mechanisms": {
+                  "contains": {
+                    "properties": {
+                      "type": {
+                        "const": "shooter"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
       }
     }
   },
-  "$comment": "Runtime additionally checks minDamage <= maxDamage, unique creature IDs and mechanism types, and registered-ID collisions."
+  "$comment": "Runtime additionally checks minDamage <= maxDamage, unique creature IDs, and registered-ID collisions."
 }
