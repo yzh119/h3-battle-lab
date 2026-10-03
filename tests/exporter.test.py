@@ -81,6 +81,25 @@ class ClipPackingTests(unittest.TestCase):
                     view = doc['bufferViews'][doc['accessors'][sampler['output']]['bufferView']]
                     self.assertEqual(struct.unpack_from('<fff', data, view['byteOffset']), (1, 1, 1) if index == group_index else (0, 0, 0))
 
+    def test_payload_sharing_preserves_every_view_and_shares_decoded_textures(self):
+        original = b'abcdefghabcd'
+        doc = {'bufferViews': [{'byteOffset': 0, 'byteLength': 4, 'target': 34962},
+                               {'byteOffset': 4, 'byteLength': 4, 'byteStride': 4},
+                               {'byteOffset': 8, 'byteLength': 4}],
+               'images': [{'bufferView': 0, 'mimeType': 'image/png', 'name': 'idle'},
+                          {'bufferView': 2, 'mimeType': 'image/png', 'name': 'walk'}],
+               'samplers': [{'wrapS': 10497}, {'wrapS': 10497}],
+               'textures': [{'source': 0, 'sampler': 0}, {'source': 1, 'sampler': 1}],
+               'accessors': [{'sparse': {'values': {'bufferView': 2}}}]}
+        packed = exporter.share_identical_payloads(doc, original)
+        self.assertEqual(packed, b'abcdefgh')
+        for view, expected in zip(doc['bufferViews'], [b'abcd', b'efgh', b'abcd']):
+            self.assertEqual(packed[view['byteOffset']:view['byteOffset'] + view['byteLength']], expected)
+        self.assertEqual(doc['bufferViews'][0]['target'], 34962)
+        self.assertEqual(doc['bufferViews'][1]['byteStride'], 4)
+        self.assertEqual(doc['textures'], [{'source': 0, 'sampler': 0}] * 2)
+        self.assertEqual(doc['accessors'][0]['sparse']['values']['bufferView'], 2)
+
     def test_ambiguous_siblings_and_cycles_are_rejected(self):
         with self.assertRaisesRegex(AssertionError, 'unique hierarchical'):
             exporter.node_paths({'nodes': [{'name': 'Rig', 'children': [1, 2]}, {'name': 'Hand'}, {'name': 'Hand'}]})

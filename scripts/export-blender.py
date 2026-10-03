@@ -7,6 +7,7 @@ Scenes: holding.blend, moving.blend, attack_front.blend, hitted.blend, death.ble
 import argparse
 import copy
 import json
+import hashlib
 import struct
 import sys
 import tempfile
@@ -126,6 +127,43 @@ def pack_clips(exports, output, geometry_clip=None):
     return [{'name': a['name'], 'channels': len(a['channels'])} for a in base['animations']]
 
 
+def share_identical_payloads(document, data):
+    """Share exact buffer bytes and texture sources without changing scene data."""
+    packed = bytearray()
+    offsets = {}
+    for view in document.get('bufferViews', []):
+        assert view.get('buffer', 0) == 0, 'Expected an embedded GLB buffer'
+        start, size = view.get('byteOffset', 0), view['byteLength']
+        payload = data[start:start + size]
+        assert len(payload) == size, 'Buffer view exceeds binary payload'
+        key = (size, hashlib.sha256(payload).digest())
+        offset = offsets.get(key)
+        if offset is None or packed[offset:offset + size] != payload:
+            while len(packed) % 4: packed.append(0)
+            offset = len(packed); packed.extend(payload); offsets[key] = offset
+        view['byteOffset'] = offset
+    # GLTFLoader caches textures by image source and sampler. Redirect identical
+    # embedded images/samplers to one source so scenes share decoded GPU textures.
+    images, samplers = {}, {}
+    image_ids, sampler_ids = {}, {}
+    for index, image in enumerate(document.get('images', [])):
+        identity = {k: v for k, v in image.items() if k not in ('name', 'bufferView')}
+        if 'bufferView' in image:
+            view = document['bufferViews'][image['bufferView']]
+            identity['payload'] = [view['byteOffset'], view['byteLength']]
+        key = json.dumps(identity, sort_keys=True)
+        image_ids[index] = images.setdefault(key, index)
+    for index, sampler in enumerate(document.get('samplers', [])):
+        key = json.dumps({k: v for k, v in sampler.items() if k != 'name'}, sort_keys=True)
+        sampler_ids[index] = samplers.setdefault(key, index)
+    for texture in document.get('textures', []):
+        if 'source' in texture: texture['source'] = image_ids[texture['source']]
+        if 'sampler' in texture: texture['sampler'] = sampler_ids[texture['sampler']]
+    while len(packed) % 4: packed.append(0)
+    document['buffers'] = [{'byteLength': len(packed)}]
+    return packed
+
+
 def pack_scene_variants(exports, output):
     """Keep clip-specific rigs/geometry intact when an action changes hierarchy."""
     base = {'asset': {'version': '2.0'}, 'scene': 0, 'scenes': [{'nodes': []}]}
@@ -200,8 +238,7 @@ def pack_scene_variants(exports, output):
                 base['accessors'].append(accessor)
             sampler = len(clip['samplers']); clip['samplers'].append({'input': refs[0], 'output': refs[1], 'interpolation': 'STEP'})
             clip['channels'].append({'sampler': sampler, 'target': {'node': group, 'path': 'scale'}})
-    while len(binary) % 4: binary.append(0)
-    base['buffers'] = [{'byteLength': len(binary)}]
+    binary = share_identical_payloads(base, binary)
     encoded = json.dumps(base, separators=(',', ':')).encode(); encoded += b' ' * (-len(encoded) % 4)
     Path(output).write_bytes(struct.pack('<III', 0x46546C67, 2, 28 + len(encoded) + len(binary)) + struct.pack('<II', len(encoded), 0x4E4F534A) + encoded + struct.pack('<II', len(binary), 0x004E4942) + binary)
     return [{'name': a['name'], 'channels': len(a['channels'])} for a in base['animations']]
