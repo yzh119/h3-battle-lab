@@ -1,6 +1,6 @@
 import { creatureArt } from './presentation.ts';
 /** Versioned creature data. No renderer, local mod settings, or executable scripts. */
-export interface CreatureStats { health: number; attack: number; defense: number; minDamage: number; maxDamage: number; speed: number }
+export interface CreatureStats { health: number; attack: number; defense: number; minDamage: number; maxDamage: number; speed: number; aiValue?: number }
 export type Mechanism =
   | { type: 'flying' }
   | { type: 'additionalAttacks'; count: number; mode?: 'melee' | 'ranged' | 'both' }
@@ -36,10 +36,11 @@ export function parseCreaturePack(value: unknown): CreaturePack {
     for (const field of ['label', 'faction']) if (typeof entry[field] !== 'string' || !(entry[field] as string).trim() || (entry[field] as string).length > 80) throw new Error(`${path}.${field}: expected 1–80 characters`);
     if (entry.ruleset !== 'custom') throw new Error(`${path}.ruleset: imported creatures must declare custom`);
     if (!object(entry.stats)) throw new Error(`${path}.stats: expected object`);
-    fields(entry.stats, ['health', 'attack', 'defense', 'minDamage', 'maxDamage', 'speed'], `${path}.stats`);
+    fields(entry.stats, ['health', 'attack', 'defense', 'minDamage', 'maxDamage', 'speed', 'aiValue'], `${path}.stats`);
     for (const field of ['health', 'minDamage', 'maxDamage']) integer(entry.stats[field], 1, 100000, `${path}.stats.${field}`);
     for (const field of ['attack', 'defense']) integer(entry.stats[field], 0, 1000, `${path}.stats.${field}`);
     integer(entry.stats.speed, 1, 50, `${path}.stats.speed`);
+    if (entry.stats.aiValue !== undefined) integer(entry.stats.aiValue, 1, 1000000, `${path}.stats.aiValue`);
     if ((entry.stats.minDamage as number) > (entry.stats.maxDamage as number)) throw new Error(`${path}.stats: minDamage exceeds maxDamage`);
     if (!Array.isArray(entry.mechanisms) || entry.mechanisms.length > 8) throw new Error(`${path}.mechanisms: expected array`);
     const types = new Set<string>();

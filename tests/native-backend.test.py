@@ -13,7 +13,7 @@ import unittest
 @unittest.skipUnless(os.environ.get("BATTLE_LAB_BACKEND") and os.environ.get("BATTLE_LAB_PROFILE"), "Native engine/profile absent")
 class NativeBackendTests(unittest.TestCase):
     def setUp(self):
-        self.process = subprocess.Popen([os.environ["BATTLE_LAB_BACKEND"]], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        self.process = subprocess.Popen([os.environ["BATTLE_LAB_BACKEND"]], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env={**os.environ, "BATTLE_LAB_PROFILE": str(getattr(self, "profile", os.environ["BATTLE_LAB_PROFILE"]))})
         self.sequence = 0
 
     def tearDown(self):

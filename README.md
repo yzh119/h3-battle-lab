@@ -37,7 +37,7 @@ Available local manifest entries populate the grouped creature catalogue. Entrie
 
 ## Custom creatures
 
-The **自定义兵种** panel validates a versioned authoring format. See the [format guide](docs/custom-creatures.md), [JSON Schema](schemas/creature-pack.schema.json) and [example](examples/custom-creatures.json). Native conversion/import is pending: validated custom creatures cannot yet join battles. Original creature IDs are protected. No TypeScript mechanism interpreter remains.
+The **自定义兵种** panel imports a versioned authoring format through an isolated standard VCMI mod. See the [format guide](docs/custom-creatures.md), [JSON Schema](schemas/creature-pack.schema.json) and [example](examples/custom-creatures.json). With a configured native engine and Python 3, imported creatures appear in the selector and can join battles. The converter validates the whole pack, prepares a candidate profile and switches sessions only after successful native initialization. Reset/reconnect preserve imported definitions; a page reload starts from the base profile. Original creature IDs are protected. No TypeScript mechanism interpreter remains.
 
 ## Local models
 
@@ -90,7 +90,7 @@ Both armies support all 28 original Castle/Necropolis creatures, including upgra
 
 Engine integration lives in this repository under `scripts/native/`. Upstream VCMI sources remain unchanged: the local bootstrap substitutes the repository-owned profile-directory implementation in a new output directory, and fixture helper changes are applied to private copies. Future rule adaptations should use VCMI mods/plugins where supported; unavoidable source changes must be tracked here as reviewable patches with reproducible build steps rather than an untracked dirty fork.
 
-The active `base-reference` profile permits only `core` and `vcmi`, excluding installed rule mods and user settings. **Original H3 base behavior remains the target, not a certified result.** Known differences such as regeneration timing still need original-game checks and engine-side handling. Named hero types/specialties/artifacts, configurable terrain/obstacles, custom pack translation, siege, full spell/creature verification, richer event animation and WASM are pending. The present native interface uses a fixed sand battlefield without initial obstacles and optional custom fighting heroes. Spell-created obstacles are engine-managed.
+The active `base-reference` profile permits only `core` and `vcmi`, excluding installed rule mods and user settings. **Original H3 base behavior remains the target, not a certified result.** Known differences such as regeneration timing still need original-game checks and engine-side handling. Named hero types/specialties/artifacts, configurable terrain/obstacles, new custom mechanisms/factions, siege, full spell/creature verification, richer event animation and WASM are pending. The present native interface uses a fixed sand battlefield without initial obstacles and optional custom fighting heroes. Spell-created obstacles are engine-managed.
 
 | Module | Responsibility |
 | --- | --- |

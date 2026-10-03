@@ -16,6 +16,8 @@ jobs:
       - run: npm test
       - run: python3 tests/exporter.test.py
       - run: python3 tests/native-profile.test.py
+      - run: python3 tests/custom-pack.test.py
+      - run: python3 tests/native-custom.test.py
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e

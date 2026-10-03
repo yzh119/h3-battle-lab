@@ -36,8 +36,9 @@ test('army capacity, selection and custom format validation work without combat'
   expect((await snapshot(page)).units.filter((u: any) => u.team === 1)).toHaveLength(7);
   await page.locator('#add-unit').click(); await expect(page.locator('#toast')).toContainText('最多 7');
   await page.locator('#remove-unit').click(); expect((await snapshot(page)).units).toHaveLength(7);
+  await expect(page.locator('#creature-import')).toBeEnabled();
   await page.locator('#creature-import').setInputFiles('examples/custom-creatures.json');
-  await expect(page.locator('#creature-import-status')).toContainText('暂不能加入对战');
+  await expect(page.locator('#creature-import-status')).toContainText(process.env.BATTLE_LAB_BACKEND ? '已载入' : '已验证');
 });
 
 test('local GLBs expose clips and change bone transforms', async ({ page, request }) => {
@@ -226,4 +227,35 @@ test('a pending model request does not block battlefield controls', async ({ pag
     expect((await snapshot(page)).units[0].imported).toBe(false);
     expect((await snapshot(page)).units[0].count).toBe(37);
   } finally { release(); }
+});
+
+
+test('custom creature import uses native stats and survives reset, rejection and reconnect', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  await missingArt(page); await open(page);
+  await expect(page.locator('#creature-import')).toBeEnabled();
+  await page.locator('#creature-import').setInputFiles('examples/custom-creatures.json');
+  await expect(page.locator('#creature-import-status')).toContainText('已载入');
+  await expect(page.locator('#engine-status')).toContainText('自定义模式');
+  await expect(page.locator('#creature-picker option')).toHaveCount(29);
+  await page.locator('#creature-picker').selectOption('custom-spectral-guard'); await page.locator('#replace-unit').click();
+  await expect.poll(async () => (await snapshot(page)).units[0].kind).toBe('custom-spectral-guard');
+  await expect(page.locator('#start-battle')).toBeEnabled(); await page.locator('#start-battle').click();
+  await expect(page.locator('#defend-turn')).toBeEnabled();
+  const initial = await snapshot(page), unit = initial.state.units.find((u: any) => u.creature === 'battle-lab-custom:custom-spectral-guard');
+  expect([unit.attack, unit.defense, unit.maxHealth, unit.speed, unit.flying]).toEqual([9, 8, 24, 7, true]);
+  expect(initial.units[0].imported).toBe(false);
+  await page.locator('#ai-step').click(); await expect.poll(async () => (await snapshot(page)).state.revision).toBe(1);
+  await page.locator('#reset').click(); await expect(page.locator('#creature-import')).toBeEnabled();
+  await page.locator('#creature-import').setInputFiles('examples/custom-creatures.json');
+  await expect(page.locator('#creature-import-status')).toContainText('原引擎会话已保留');
+  await expect(page.locator('#creature-picker option')).toHaveCount(29);
+  await page.locator('#hero-editor summary').click(); await page.locator('#hero-enabled-0').check();
+  await page.locator('#hero-attack-0').fill('12');
+  await expect(page.locator('#connect-engine')).toBeEnabled(); await page.locator('#connect-engine').click();
+  await expect(page.locator('#start-battle')).toBeEnabled(); await expect(page.locator('#engine-status')).toContainText('自定义模式');
+  expect((await snapshot(page)).units[0].kind).toBe('custom-spectral-guard');
+  await page.locator('#start-battle').click(); await expect(page.locator('#defend-turn')).toBeEnabled();
+  expect((await snapshot(page)).state.units.some((u: any) => u.creature === 'battle-lab-custom:custom-spectral-guard')).toBe(true);
+  expect((await snapshot(page)).state.heroes[0].attack).toBe(12);
 });

@@ -40,7 +40,7 @@ Verified locally:
 
 The generic backend now accepts both armies (up to seven stacks each) from all 28 original Castle/Necropolis definitions. Actual engine integration tests cover default and explicit deployment, double-wide occupancy, legal movement, waiting, defense, ranged double attacks, melee/retaliation/extra strikes, rejected stale/illegal requests, atomic failed creation, victory cleanup and a fresh battle. Browser tests connect through the real HTTP transport with artwork intentionally missing, check damage playback at impact, compare the displayed final state with the native response and exercise defense/reset. Optional local GLB tests also verify animated bone transforms.
 
-This is still a limited interface: no fighting heroes or spell commands, configurable terrain/obstacles, custom creature conversion or WASM. The battlefield and the army containers’ map tiles are both fixed sand, without obstacles. A fixture check verifies that all 28 creatures retain their base speed rather than inheriting grass-native bonuses from the upstream test map. Unknown native messages remain generic authoritative updates; some creature abilities will need richer visual events and dedicated tests. This evidence does not establish full original H3 parity.
+Optional custom heroes, secondary skills, native spell commands and versioned custom-creature mod imports are now connected. Named heroes/specialties/artifacts, configurable terrain/obstacles, siege and WASM remain pending. The battlefield and the army containers’ map tiles are both fixed sand, without initial obstacles; spell-created obstacles are engine-managed. A fixture check verifies that all 28 creatures retain their base speed rather than inheriting grass-native bonuses from the upstream test map. Unknown native messages remain generic authoritative updates; some creature abilities will need richer visual events and dedicated tests. This evidence does not establish full original H3 parity.
 
 For an existing compatible macOS Ninja build, bootstrap an owned derivative without rebuilding or modifying the upstream tree:
 
@@ -76,13 +76,13 @@ Use a versioned request/response protocol shared by native transport and a WASM 
 | Act | Battle ID, expected state revision, active stack and action; returns ordered events plus authoritative final state |
 | Dispose | Releases one battle and its owned resources |
 
-Actions must cover move, melee, shoot, wait, defend and eventually hero spells. Events must capture movement paths, each strike and retaliation, damage/casualties, deaths, spell effects and round/turn changes. They must carry enough before/after state for the renderer to play intermediate animation without calculating outcomes or prematurely displaying final health. Illegal or stale actions must not mutate state. Seeded input histories should reproduce results.
+Actions must cover move, melee, shoot, wait, defend and hero spells. Events must capture movement paths, each strike and retaliation, damage/casualties, deaths, spell effects and round/turn changes. They must carry enough before/after state for the renderer to play intermediate animation without calculating outcomes or prematurely displaying final health. Illegal or stale actions must not mutate state. Seeded input histories should reproduce results.
 
 The GUI sends player intentions and displays the engine's legal options. It must not calculate movement eligibility, damage previews, attack counts, splash victims or turn queues. Event timing and projectile trajectories are presentation decisions; their outcomes come from the engine.
 
 ## Custom creatures and mechanisms
 
-Keep one versioned authoring format for creature stats, declarative mechanisms and artwork IDs. Translate that format into VCMI creature/bonus/script configuration in an owned custom rules profile. Importing the current version-1 JSON into the viewer does not yet install a creature in VCMI.
+Keep one versioned authoring format for creature stats, declarative mechanisms and artwork IDs. Translate that format into VCMI creature/bonus/script configuration in an owned custom rules profile. Importing version-1 JSON into the viewer now prepares a standard `battle-lab-custom` mod in an isolated candidate profile. All definitions load during native initialization; failed candidates preserve the original session. See [the format guide](custom-creatures.md).
 
 The backend must advertise supported mechanisms and reject unsupported fields explicitly. Compose existing VCMI mechanisms through data; implement new behavior in engine code or engine scripts, extending the translator and schema together. Do not implement the same mechanism in TypeScript. Original and custom profiles must remain distinguishable, and custom packs must not silently override base creatures. Art remains optional and separate from rules.
 
@@ -94,24 +94,25 @@ Each line is one JSON request `{ "version": 1, "requestId": "unique-id", "op": "
 
 | Operation | Fields and response |
 | --- | --- |
-| `catalogue` | Original creature IDs/data, `backend`, `rulesProfile`, `customPacks: false`, `heroSpells: false`, `tenWeekTownArmies` |
-| `create` | `seed` (0–2³¹−1), `armies` (two arrays of 1–7 `{creature,count,slot?,hex?}`); native initial state/events |
+| `catalogue` | Original creature IDs/data, `backend`, `rulesProfile`, `customPacks: true`, `customMechanisms`, `heroSpells: true`, native spells/skills, `tenWeekTownArmies` |
+| `create` | `seed` (0–2³¹−1), `armies` (two arrays of 1–7 `{creature,count,slot?,hex?}`), optional `heroes`; native initial state/events |
+| `spellTargets` | `revision`, active `stack`, `spell`; native legal ordered target combinations |
 | `state` | Current authoritative state |
-| `act` | `revision`, active `stack`, `action`: `wait`, `defend`, `move` (+`hex`), `shoot` (+`target`), `melee` (+`target`,`from`) |
+| `act` | `revision`, active `stack`, `action`: `wait`, `defend`, `move` (+`hex`), `shoot` (+`target`), `melee` (+`target`,`from`), `spell` (+`spell`,`targets`), `ai` |
 | `dispose` | Releases the battle; the process can create another |
 
-Original IDs are 0–13 and 56–69. Counts are 1–99,999. Optional `slot` is 0–6; absent slots default to input array index. Duplicate slot IDs are rejected. Sparse slots and out-of-order input are accepted, with native slot IDs preserved. Deployment hexes are optional; the engine supplies default formation and double-wide adjustments. State contains native units/footprints, counts/health/ammo, round, winner, queue and legal actions with native paths. Actions return ordered messages containing before/after state, followed by final state with the next revision. The wrapper validates actions against native legal options before mutating state. Failed creation preserves the prior battle.
+Original IDs are 0–13 and 56–69. Custom profiles return additional numeric IDs and stable `battle-lab-custom:<author-id>` keys; use the current catalogue rather than persisting numeric custom IDs. Counts are 1–99,999. Optional `slot` is 0–6; absent slots default to input array index. Duplicate slot IDs are rejected. Sparse slots and out-of-order input are accepted, with native slot IDs preserved. Deployment hexes are optional; the engine supplies default formation and double-wide adjustments. State contains native units/footprints, counts/health/ammo, round, winner, queue and legal actions with native paths. Actions return ordered messages containing before/after state, followed by final state with the next revision. The wrapper validates actions against native legal options before mutating state. Failed creation preserves the prior battle.
 
 `tenWeekTownArmies` is authoritative GUI preset data: `{weeks:10, profile:"complete-town-no-grail", armies:[...]}`. Each tier has `slot`, `base`, `upgraded`, `weekly`, and `count`. An isolated native town fixture calls VCMI `getGrowthInfo` with ordinary buildings present, excluding the Grail and external bonuses. The frontend copies the returned counts and IDs without calculating growth. This metadata fixture does not modify the active battle.
 
-The local HTTP envelope is `{session?,request}` at `/api/engine`, with `{session,response}` returned. A first `catalogue` without a session creates a process. Each browser session owns a private writable profile; its data directory points at the prepared resources. No combat code runs in the HTTP bridge. Do not expose this development process launcher as a public service.
+The local HTTP envelope is `{session?,request}` at `/api/engine`, with `{session,response}` returned. A first `catalogue` without a session creates a process. Each browser session owns a private writable profile; its data directory points at the prepared resources. HTTP operation `importPack` takes a version-1 `pack` while no battle is active. It appends definitions to the session pack, runs the Python data converter in a new private profile, initializes a candidate native process and returns its catalogue with a new session ID. This operation belongs to the process-owning HTTP wrapper, not the raw JSON-lines binary. Candidate failure retains the previous process. Concurrent requests are rejected during the switch. Reconnection reapplies the GUI's imported pack to a fresh process. Native mod checks allow exactly `core`, `vcmi` and the generated custom mod in this explicitly marked profile; base profiles continue to allow only `core` and `vcmi`. No combat code runs in the HTTP bridge or converter. Do not expose this development process launcher as a public service.
 
 ## Remaining implementation
 
 1. Replace the local relink bootstrap with a pinned dedicated source build; upstream files remain untouched.
-2. Add fighting heroes, skill/spell commands, configurable terrain/obstacles and richer effect events; verify remaining creature abilities and original H3 differences in the engine.
-3. Translate the versioned custom-creature format into isolated VCMI definitions/bonuses/scripts. Advertise only verified engine capabilities.
-4. Integrate and review the remaining latest private models.
+2. Add named heroes, specialties/artifacts, configurable terrain/obstacles, siege and richer effect events; verify remaining creature abilities and original H3 differences in the engine.
+3. Extend the standard custom mod translator with further verified mechanisms, native faction selection and engine scripts. Advertise only verified engine capabilities.
+4. Review the integrated 28 private models and remaining material/animation fidelity; loading does not establish appearance acceptance.
 5. Compile the same wrapper with Emscripten. Platform paths, filesystems, threading, dynamic libraries and scripting need browser support. No WASM build has been demonstrated.
 
 VCMI-Gym's Python/pybind11 environment and threaded connector are native references, not a browser backend. Its action subset also does not establish hero-spell support or ordered animation events for this viewer.

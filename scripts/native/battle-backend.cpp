@@ -11,6 +11,8 @@
 #include "lib/battle/CPlayerBattleCallback.h"
 #include "lib/spells/ISpellMechanics.h"
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 
 class AIEnvironment final : public Environment
 {
@@ -45,7 +47,19 @@ int64_t integer(const JsonNode & value, int64_t low, int64_t high)
         throw std::runtime_error("Expected integer in range " + std::to_string(low) + ".." + std::to_string(high));
     return value.Integer();
 }
-bool allowedCreature(int id) { return (id >= 0 && id <= 13) || (id >= 56 && id <= 69); }
+JsonNode customPack;
+std::map<int, JsonNode> customDefinitions;
+bool allowedCreature(int id) { return (id >= 0 && id <= 13) || (id >= 56 && id <= 69) || customDefinitions.contains(id); }
+void loadCustomMetadata()
+{
+    const auto path = std::filesystem::path(std::getenv("BATTLE_LAB_PROFILE")) / ".battle-lab-custom";
+    if (!std::filesystem::exists(path)) return;
+    if (std::filesystem::file_size(path) > 1024 * 1024) throw std::runtime_error("Custom metadata exceeds 1 MB");
+    std::ifstream stream(path); std::string data((std::istreambuf_iterator<char>(stream)), {});
+    JsonParsingSettings settings; settings.mode = JsonParsingSettings::JsonFormatMode::JSON;
+    JsonParser parser(data.data(), data.size(), settings); customPack = parser.parse("custom-pack");
+    if (!parser.isValid() || !customPack["creatures"].isVector()) throw std::runtime_error("Invalid custom pack metadata");
+}
 
 JsonNode tenWeekTownArmies()
 {
@@ -90,8 +104,10 @@ JsonNode catalogue()
 {
     JsonNode result;
     result["backend"].String() = "vcmi-native";
-    result["rulesProfile"].String() = "base-reference";
-    result["customPacks"].Bool() = false;
+    result["rulesProfile"].String() = customDefinitions.empty() ? "base-reference" : "custom-reference";
+    result["customPacks"].Bool() = true;
+    for (const auto * mechanism : {"flying", "additionalAttacks", "regeneration", "retaliations", "blocksRetaliation", "shooter", "undead", "deathCloud"})
+        result["customMechanisms"].Vector().emplace_back(mechanism);
     result["heroSpells"].Bool() = true;
     for (const auto & spell : LIBRARY->spellh->objects)
     {
@@ -107,7 +123,7 @@ JsonNode catalogue()
     }
     result["battleAI"].String() = "VCMI BattleEvaluator";
     result["tenWeekTownArmies"] = tenWeekTownArmies();
-    for (int id = 0; id < 70; ++id)
+    for (int id = 0; id < static_cast<int>(LIBRARY->creh->objects.size()); ++id)
     {
         if (!allowedCreature(id)) continue;
         const auto * creature = CreatureID(id).toCreature();
@@ -115,6 +131,12 @@ JsonNode catalogue()
         entry["id"].Integer() = id;
         entry["key"].String() = creature->getJsonKey();
         entry["label"].String() = creature->getNameSingularTranslated();
+        if (customDefinitions.contains(id)) {
+            const auto & definition = customDefinitions.at(id);
+            entry["art"].String() = definition["id"].String();
+            entry["faction"].String() = definition["faction"].String();
+            entry["custom"].Bool() = true;
+        }
         entry["health"].Integer() = creature->getBaseHitPoints();
         entry["speed"].Integer() = creature->getBaseSpeed();
         entry["attack"].Integer() = creature->getBaseAttack();
@@ -154,7 +176,7 @@ public:
                 if (!slots.insert(slot).second) throw std::runtime_error("Duplicate army slot");
                 stack["slot"].Integer() = slot;
                 ++index;
-                const int id = integer(stack["creature"], 0, 69);
+                const int id = integer(stack["creature"], 0, INT32_MAX);
                 if (!allowedCreature(id)) throw std::runtime_error("Only original Castle/Necropolis creatures supported");
                 integer(stack["count"], 1, 99999);
                 if (!stack["hex"].isNull() && !BattleHex(integer(stack["hex"], 0, 186)).isAvailable())
@@ -460,9 +482,18 @@ int main()
         VCMIDirs::get();
         auto library = std::make_unique<GameLibrary>(); LIBRARY = library.get();
         library->initializeFilesystem(false);
+        loadCustomMetadata();
         const auto & mods = library->modh->getActiveMods();
-        if (std::set<std::string>(mods.begin(), mods.end()) != std::set<std::string>{"core", "vcmi"}) throw std::runtime_error("Unexpected active mods");
+        std::set<std::string> allowedMods = {"core", "vcmi"};
+        if (!customPack.isNull()) allowedMods.insert("battle-lab-custom");
+        if (std::set<std::string>(mods.begin(), mods.end()) != allowedMods) throw std::runtime_error("Unexpected active mods");
         library->initializeLibrary();
+        if (!customPack.isNull()) for (const auto & definition : customPack["creatures"].Vector()) {
+            const auto key = "battle-lab-custom:" + definition["id"].String();
+            const auto found = std::find_if(LIBRARY->creh->objects.begin(), LIBRARY->creh->objects.end(), [&](const auto & creature) { return creature && creature->getJsonKey() == key; });
+            if (found == LIBRARY->creh->objects.end()) throw std::runtime_error("Custom creature failed to initialize");
+            customDefinitions.emplace((*found)->getIndex(), definition);
+        }
         std::unique_ptr<BattleSession> session;
         std::string line;
         while (std::getline(std::cin, line))

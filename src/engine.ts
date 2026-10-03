@@ -1,3 +1,4 @@
+import type { CreaturePack } from './creatures.ts';
 /** Authoritative engine data and transport. No combat mechanics. */
 export interface NativeUnit {
   id: number; creature: string; label: string; side: number; controller: number; slot: number; hex: number;
@@ -21,23 +22,35 @@ export interface SpellDefinition { id: number; label: string; key: string; level
 export interface NativeHero { side: number; mana: number; maxMana: number; attack: number; defense: number; power: number; knowledge: number; spells: (SpellDefinition & { cost: number; castable: boolean })[] }
 export interface HeroConfig { attack: number; defense: number; power: number; knowledge: number; mana?: number; skills: { id: number; level: number }[]; spells: number[] }
 export type SpellTarget = { unit?: number; hex?: number }[];
-export interface NativeCreature { id: number; key: string; label: string; health: number; speed: number; attack: number; defense: number; minDamage: number; maxDamage: number; shots: number; doubleWide: boolean }
+export interface NativeCreature { id: number; key: string; label: string; health: number; speed: number; attack: number; defense: number; minDamage: number; maxDamage: number; shots: number; doubleWide: boolean; art?: string; faction?: string; custom?: boolean }
 export interface EngineResult { state: EngineState; events: EngineEvent[] }
 export interface ArmyStack { creature: number; count: number; slot?: number; hex?: number }
 export interface TownArmyPreset { weeks: number; profile: string; armies: { slot: number; base: number; upgraded: number; weekly: number; count: number }[][] }
+export interface EngineCatalogue { backend: string; battleAI?: string; spells: SpellDefinition[]; skills: { id: number; label: string }[]; tenWeekTownArmies: TownArmyPreset; creatures: NativeCreature[]; rulesProfile: string; customPacks: boolean; customMechanisms?: string[]; heroSpells: boolean }
 export class EngineClient {
   private session?: string;
+  private loadedPack?: CreaturePack;
   async request<T>(op: string, data: Record<string, unknown> = {}): Promise<T> {
+    const requestedSession = this.session;
     const response = await fetch('/api/engine', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session: this.session, request: { version: 1, op, ...data } }) });
     if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('本地 VCMI 接口不可用；请使用配置了引擎的开发服务器。');
     const envelope = await response.json();
     if (!response.ok) throw new Error(envelope.error ?? 'VCMI connection failed');
     if (!envelope.response?.ok) throw new Error(envelope.response?.error ?? 'VCMI rejected request');
-    this.session = envelope.session;
+    if (this.session === requestedSession) this.session = envelope.session;
     return envelope.response.result as T;
   }
-  connect() { this.session = undefined; return this.request<{ backend: string; battleAI?: string; spells: SpellDefinition[]; skills: { id: number; label: string }[]; tenWeekTownArmies: TownArmyPreset; creatures: NativeCreature[]; rulesProfile: string; customPacks: boolean; heroSpells: boolean }>('catalogue'); }
+  async connect() {
+    this.session = undefined;
+    const info = await this.request<EngineCatalogue>('catalogue');
+    return this.loadedPack && info.customPacks ? this.request<EngineCatalogue>('importPack', { pack: this.loadedPack }) : info;
+  }
+  async importPack(pack: CreaturePack) {
+    const info = await this.request<EngineCatalogue>('importPack', { pack });
+    this.loadedPack = { version: 1, creatures: [...(this.loadedPack?.creatures ?? []), ...pack.creatures] };
+    return info;
+  }
   deployment(seed: number, armies: ArmyStack[][], heroes?: (HeroConfig | null)[]) { return this.request<EngineResult>('deployment', { seed, armies, heroes }); }
   create(seed: number, armies: ArmyStack[][], heroes?: (HeroConfig | null)[]) { return this.request<EngineResult>('create', { seed, armies, heroes }); }
   act(state: EngineState, action: string, options: Record<string, unknown> = {}) {

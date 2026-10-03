@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import './style.css';
-import { EngineClient, type EngineState, type EngineEvent, type NativeUnit, type TownArmyPreset, type NativeCreature } from './engine.ts';
+import { EngineClient, type EngineState, type EngineEvent, type NativeUnit, type TownArmyPreset, type NativeCreature, type EngineCatalogue } from './engine.ts';
 import { creatureArt, cellAt, key, fromHexId, toHexId, type Hex, type VisualUnit } from './presentation.ts';
 import { heroEditor, readHeroes, spellTargetLabel } from './heroes.ts';
 import type { SpellTarget } from './engine.ts';
-import { registerCreaturePack } from './creatures.ts';
+import { parseCreaturePack } from './creatures.ts';
 import { createWorld, worldPosition } from './world.ts';
 import { UnitView, type Manifest } from './units.ts';
 
@@ -13,7 +13,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div id="unit-tooltip" role="tooltip" hidden></div><div id="stack-labels" aria-label="场上兵力"></div><header><a class="brand" href="https://github.com/yzh119/h3-battle-lab" target="_blank" rel="noreferrer">H3 <span>BATTLE LAB</span></a><div class="top-label">战场实验室 <span>01 / 林地</span></div><div class="live"><i></i> 实时 3D</div></header>
   <aside class="panel"><div class="eyebrow">战场视角</div><h1>走进战场。</h1><p class="intro">换一个角度，看清每一次交锋。</p><select id="unit-picker" aria-label="选择场上单位"><option value="azure">骷髅兵</option><option value="ember">僵尸</option></select>
   <button id="connect-engine">连接引擎</button><p id="engine-status" role="status">正在连接本地引擎…</p><button id="ten-week-armies" disabled>十周城镇产出</button><label class="switch"><span>使用升级兵种</span><input id="preset-upgraded" type="checkbox" checked></label><p class="preset-note">蓝方城堡 · 红方墓园<br>完整城镇，不含圣杯及额外奖励</p><button id="start-battle" disabled>开始对战</button><p id="turn-status" role="status">配置阵容后开始对战</p><div class="button-row"><button id="wait-turn" disabled>等待</button><button id="defend-turn" disabled>防御</button></div><label class="switch"><span>蓝方 VCMI AI</span><input id="ai-blue" type="checkbox"></label><label class="switch"><span>红方 VCMI AI</span><input id="ai-red" type="checkbox"></label><button id="ai-step" disabled>VCMI AI 行动一次</button><p id="turn-queue"></p><label class="switch"><span>射手强制近战</span><input id="force-melee" type="checkbox"></label>
-  <details id="army-editor" open><summary>配置双方阵容</summary><p id="selected-slot-label"></p><label for="creature-picker">兵种</label><select id="creature-picker" aria-label="选择上场兵种"></select><label for="team-picker">阵营</label><select id="team-picker" aria-label="选择上场阵营"><option value="0">蓝方</option><option value="1">红方</option></select><label for="stack-count">每队数量</label><input id="stack-count" aria-label="每队数量" type="number" min="1" max="99999" step="1" value="20"><button id="assign-slot">配置选中格子</button><button id="apply-count" class="quiet">应用数量到选中队伍</button><p id="creature-note"></p><div class="button-row"><button id="add-unit">添加上场</button><button id="replace-unit">替换选中</button></div><button id="remove-unit" class="quiet">移除选中单位</button><p>每方最多 7 队 · 双方均可操控<br>点击队伍格配置兵种与数量；空格也可直接选择</p></details><details id="hero-editor"><summary>英雄与魔法</summary><p>自定义英雄 · 无特长和宝物<br>属性、技能与魔法效果由引擎处理</p><div id="hero-configs"></div></details><details id="spellbook"><summary>战斗魔法</summary><p id="hero-status">英雄参战后可施法</p><select id="spell-picker" aria-label="选择战斗魔法" disabled></select><select id="spell-target" aria-label="选择施法目标" disabled></select><button id="cast-spell" disabled>施放魔法</button><p id="spell-status" role="status"></p></details><details><summary>自定义兵种</summary><p>验证版本 1 的兵种 JSON。引擎端导入正在开发，通过格式验证的定义暂不能加入对战。</p><input id="creature-import" aria-label="导入自定义兵种 JSON" type="file" accept=".json,application/json"><p id="creature-import-status" role="status"></p></details><div class="section-label">镜头</div><div class="button-row"><button id="overview" class="active">全局</button><button id="closeup">兵种特写</button></div>
+  <details id="army-editor" open><summary>配置双方阵容</summary><p id="selected-slot-label"></p><label for="creature-picker">兵种</label><select id="creature-picker" aria-label="选择上场兵种"></select><label for="team-picker">阵营</label><select id="team-picker" aria-label="选择上场阵营"><option value="0">蓝方</option><option value="1">红方</option></select><label for="stack-count">每队数量</label><input id="stack-count" aria-label="每队数量" type="number" min="1" max="99999" step="1" value="20"><button id="assign-slot">配置选中格子</button><button id="apply-count" class="quiet">应用数量到选中队伍</button><p id="creature-note"></p><div class="button-row"><button id="add-unit">添加上场</button><button id="replace-unit">替换选中</button></div><button id="remove-unit" class="quiet">移除选中单位</button><p>每方最多 7 队 · 双方均可操控<br>点击队伍格配置兵种与数量；空格也可直接选择</p></details><details id="hero-editor"><summary>英雄与魔法</summary><p>自定义英雄 · 无特长和宝物<br>属性、技能与魔法效果由引擎处理</p><div id="hero-configs"></div></details><details id="spellbook"><summary>战斗魔法</summary><p id="hero-status">英雄参战后可施法</p><select id="spell-picker" aria-label="选择战斗魔法" disabled></select><select id="spell-target" aria-label="选择施法目标" disabled></select><button id="cast-spell" disabled>施放魔法</button><p id="spell-status" role="status"></p></details><details><summary>自定义兵种</summary><p>导入版本 1 的兵种 JSON；VCMI 通过独立 mod 加载机制。自定义模式与原版模式分别标记。</p><input id="creature-import" aria-label="导入自定义兵种 JSON" type="file" accept=".json,application/json"><p id="creature-import-status" role="status"></p></details><div class="section-label">镜头</div><div class="button-row"><button id="overview" class="active">全局</button><button id="closeup">兵种特写</button></div>
   <div class="button-row zoom-controls"><button id="zoom-out" aria-label="缩小战场">− 缩小</button><button id="zoom-in" aria-label="放大战场">＋ 放大</button></div><div class="section-label">场景</div><select id="background-picker" aria-label="战场背景"><option value="">自由 3D 场景</option></select><p id="scene-hint" class="intro">拖动旋转镜头</p><div class="section-label">环境</div><div class="button-row"><button id="day" class="active">暖阳</button><button id="dusk">阴天</button></div>
   <label class="switch"><span>显示六角格</span><input id="grid" type="checkbox" checked></label>
   <label class="switch"><span>实时阴影</span><input id="shadows" type="checkbox" checked></label>
@@ -42,7 +42,10 @@ const nativeUnits = new Map<string, NativeUnit>();
 const slotViews = new Map<string, UnitView>();
 const badges = new Map<string, HTMLDivElement>();
 function message(text: string) { $('#toast').textContent = text; $('#toast').classList.add('show'); }
-const metadata = (kind: string) => creatureArt.find(c => c.art === kind)!;
+let customArt: typeof creatureArt = [];
+let customPacksAvailable = false;
+const allArt = () => [...creatureArt, ...customArt];
+const metadata = (kind: string) => allArt().find(c => c.art === kind)!;
 function preview(kind: string, team: number, count: number, id = `unit-${nextId++}`, cell = cellAt(team ? 11 : 5, 5), armySlot = 0): VisualUnit {
   return { id, kind, label: metadata(kind).label, team, armySlot, cell, initialCount: count, hp: 1 };
 }
@@ -64,6 +67,7 @@ function updateSelection(view = selected) {
   if (lastEditorSelection !== view) { $<HTMLInputElement>('#stack-count').value = String(view.unit.initialCount); lastEditorSelection = view; }
   for (const id of ['#creature-picker', '#team-picker', '#stack-count', '#apply-count', '#add-unit', '#replace-unit', '#remove-unit', '#creature-import', '#assign-slot'])
     ($<HTMLInputElement>(id)).disabled = busy || !!state;
+  $<HTMLInputElement>('#creature-import').disabled = busy || deploying || !!state;
   $<HTMLButtonElement>('#ten-week-armies').disabled = busy || !!state || !townPreset;
   $<HTMLInputElement>('#preset-upgraded').disabled = busy || !!state;
   $<HTMLButtonElement>('#reset').disabled = busy;
@@ -80,7 +84,7 @@ function updateSelection(view = selected) {
   scheduleAI();
   const active = views.find(v => nativeUnits.get(v.unit.id)?.id === state?.activeStack);
   $('#turn-status').textContent = state ? state.winner != null ? `${state.winner === 0 ? '蓝方' : state.winner === 1 ? '红方' : '双方'}${state.winner > 1 ? '平局' : '胜利'} · 第 ${state.round} 回合` : `第 ${state.round} 回合 · ${controller(nativeUnits.get(active?.unit.id ?? '')) ? '红方' : '蓝方'} ${active?.unit.label ?? ''}行动` : '配置阵容后开始对战';
-  $('#turn-queue').textContent = (state?.queue ?? []).map(id => [...nativeUnits.values()].find(u => u.id === id)).map(u => u ? creatureArt.find(c => c.key === u.creature)?.label : '').join(' → ');
+  $('#turn-queue').textContent = (state?.queue ?? []).map(id => [...nativeUnits.values()].find(u => u.id === id)).map(u => u ? allArt().find(c => c.key === u.creature)?.label : '').join(' → ');
 }
 function renderArmySlots() {
   const root = $('#army-slots'); root.replaceChildren();
@@ -122,7 +126,7 @@ function applyState(next: EngineState, selectActor = false) {
       const configured = slotViews.get(`${unit.side}:${unit.slot}`);
       if (configured && !nativeUnits.has(configured.unit.id)) view = configured;
       else {
-        const art = creatureArt.find(c => c.key === unit.creature);
+        const art = allArt().find(c => c.key === unit.creature);
         view = attach({ id: `engine-${unit.id}`, kind: art?.art ?? unit.creature, label: art?.label ?? unit.label, team: unit.side, armySlot: -1, cell: fromHexId(unit.hex), initialCount: unit.count, hp: unit.health });
         const asset = manifest?.units[view.unit.kind]; if (asset) void view.setAsset(asset).catch(() => {});
       }
@@ -283,9 +287,17 @@ async function previewDeployment() {
   } catch (error) { if (request === deploymentRequest) message(error instanceof Error ? error.message : String(error)); }
   finally { if (request === deploymentRequest) { deploying = false; updateSelection(); } }
 }
+function readCatalogue(info: EngineCatalogue) {
+  nativeCreatures.clear(); info.creatures.forEach(c => nativeCreatures.set(c.key, c));
+  customPacksAvailable = info.customPacks;
+  customArt = info.creatures.filter(c => c.custom && c.art).map(c => ({ id: c.id, key: c.key, art: c.art!, label: c.label, faction: c.faction ?? '自定义' }));
+  connected = info.backend === 'vcmi-native' && creatureArt.every(c => nativeCreatures.has(c.key));
+  $('#engine-status').textContent = connected ? `VCMI 已连接 · ${info.rulesProfile === 'custom-reference' ? '自定义模式' : '原版参考模式'} · ${info.creatures.length} 种兵种` : '引擎兵种目录不完整';
+  refreshCatalogue();
+}
 async function connect() {
   if (busy || state) return; busy = true; updateSelection(); $('#engine-status').textContent = '正在连接本地引擎…';
-  try { const info = await engine.connect(); heroesAvailable = info.heroSpells === true; aiAvailable = info.battleAI === "VCMI BattleEvaluator"; townPreset = info.tenWeekTownArmies; heroEditor($('#hero-configs'), info.spells ?? [], info.skills ?? [], () => void previewDeployment()); nativeCreatures.clear(); info.creatures.forEach(c => nativeCreatures.set(c.key, c)); connected = info.backend === 'vcmi-native' && info.creatures.length === 28; $('#engine-status').textContent = 'VCMI 已连接 · 城堡与墓园 28 种兵种'; }
+  try { const info = await engine.connect(); heroesAvailable = info.heroSpells === true; aiAvailable = info.battleAI === "VCMI BattleEvaluator"; townPreset = info.tenWeekTownArmies; if (!$('#hero-configs').children.length) heroEditor($('#hero-configs'), info.spells ?? [], info.skills ?? [], () => void previewDeployment()); readCatalogue(info); }
   catch (error) { connected = false; heroesAvailable = false; aiAvailable = false; townPreset = undefined; nativeCreatures.clear(); $('#engine-status').textContent = error instanceof Error ? error.message : '引擎连接失败'; }
   busy = false; updateSelection(); await previewDeployment();
 }
@@ -328,11 +340,13 @@ function selectView(view: UnitView) { editorTeam = view.unit.team; editorSlot = 
 $('#unit-picker').onchange = () => selectView(views.find(v => v.unit.id === $<HTMLSelectElement>('#unit-picker').value)!);
 function readCount() { const value = $<HTMLInputElement>('#stack-count').valueAsNumber; if (!Number.isInteger(value) || value < 1 || value > 99999) { message('数量须为 1–99999 的整数。'); return null; } return value; }
 function refreshCatalogue() {
+  const selection = $<HTMLSelectElement>('#creature-picker').value;
   $('#creature-picker').replaceChildren();
-  for (const faction of ['城堡', '墓园']) { const group = document.createElement('optgroup'); group.label = faction;
-    for (const creature of creatureArt.filter(c => c.faction === faction)) group.append(new Option(`${creature.label}${manifest?.units[creature.art] ? manifest.units[creature.art].draft ? ' · 美术草稿' : '' : ' · 示意模型'}`, creature.art));
+  for (const faction of [...new Set(allArt().map(c => c.faction))]) { const group = document.createElement('optgroup'); group.label = faction;
+    for (const creature of allArt().filter(c => c.faction === faction)) group.append(new Option(`${creature.label}${manifest?.units[creature.art] ? manifest.units[creature.art].draft ? ' · 美术草稿' : '' : ' · 示意模型'}`, creature.art));
     $('#creature-picker').append(group);
   }
+  if (allArt().some(c => c.art === selection)) $<HTMLSelectElement>('#creature-picker').value = selection;
 }
 $('#team-picker').onchange = () => { editorTeam = Number($<HTMLSelectElement>('#team-picker').value); const view = views.find(v => v.unit.team === editorTeam && v.unit.armySlot === editorSlot); updateSelection(view ?? selected); };
 $('#apply-count').onclick = () => { if (busy || state) return; const value = readCount(); if (value !== null) { selected.unit.initialCount = value; updateSelection(); void previewDeployment(); } };
@@ -401,7 +415,21 @@ $<HTMLInputElement>('#shadows').onchange = event => { world.renderer.shadowMap.e
 $<HTMLInputElement>('#quality').oninput = event => { const value = Number((event.target as HTMLInputElement).value); world.renderer.setPixelRatio(Math.min(devicePixelRatio, value)); $('#quality-label').textContent = value > 1 ? '高' : '标准'; };
 document.querySelectorAll<HTMLButtonElement>('[data-action]').forEach(button => { button.onclick = () => { if (!busy) selected.play(button.dataset.action!, true); }; });
 $<HTMLInputElement>('#import').onchange = async event => { const file = (event.target as HTMLInputElement).files?.[0]; if (!file || busy) return; busy = true; const url = URL.createObjectURL(file); try { await selected.setAsset({ label: file.name, url }); updateSelection(); } catch { message('模型载入失败，请使用贴图内嵌的 GLB。'); } finally { URL.revokeObjectURL(url); busy = false; } };
-$<HTMLInputElement>('#creature-import').onchange = async event => { const input = event.target as HTMLInputElement, file = input.files?.[0]; if (!file || busy || state) return; try { if (file.size > 1024 * 1024) throw new Error('兵种包不能超过 1 MB'); const pack = registerCreaturePack(JSON.parse(await file.text())); $('#creature-import-status').textContent = `已验证 ${pack.creatures.length} 个兵种定义；引擎端自定义包转换仍在开发，暂不能加入对战。`; } catch (error) { $('#creature-import-status').textContent = error instanceof Error ? error.message : String(error); } finally { input.value = ''; } };
+$<HTMLInputElement>('#creature-import').onchange = async event => {
+  const input = event.target as HTMLInputElement, file = input.files?.[0];
+  if (!file || busy || state) return;
+  try {
+    if (file.size > 1024 * 1024) throw new Error('兵种包不能超过 1 MB。');
+    const pack = parseCreaturePack(JSON.parse(await file.text()));
+    if (!connected || !customPacksAvailable) {
+      $('#creature-import-status').textContent = `已验证 ${pack.creatures.length} 个兵种定义；连接支持自定义包的原生引擎后才能加入对战。`; return;
+    }
+    busy = true; updateSelection(); $('#creature-import-status').textContent = '正在初始化独立 VCMI mod…';
+    const info = await engine.importPack(pack); readCatalogue(info);
+    $('#creature-import-status').textContent = `已载入 ${pack.creatures.length} 个自定义兵种，可在阵容中选择。`;
+  } catch (error) { $('#creature-import-status').textContent = error instanceof Error ? error.message : String(error); }
+  finally { input.value = ''; busy = false; updateSelection(); if (connected && !state) void previewDeployment(); }
+};
 function loadModel(view: UnitView) {
   const asset = manifest?.units[view.unit.kind];
   if (asset) void view.setAsset(asset).then(() => { if (views.includes(view)) updateSelection(); }).catch(() => {

@@ -1,8 +1,10 @@
-import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, copyFile, symlink, rm } from 'node:fs/promises';
+import { spawn, execFile } from 'node:child_process';
+import { mkdtemp, mkdir, copyFile, symlink, rm, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
+import { promisify } from 'node:util';
+const executeFile = promisify(execFile);
 
 /** Local transport only. No combat calculations or proprietary data responses. */
 export function createEngineBridge() {
@@ -17,14 +19,22 @@ export function createEngineBridge() {
   }, 60000);
   idleTimer.unref();
 
-  async function openSession() {
+  async function openSession(pack) {
     await mkdir(runtimeRoot, { recursive: true });
     const root = await mkdtemp(join(runtimeRoot, 'session-'));
     try {
-      await copyFile(join(profile, '.battle-lab-profile'), join(root, '.battle-lab-profile'));
-      await symlink(resolve(profile, 'data'), join(root, 'data'), 'dir');
-      const child = spawn(resolve(executable), [], { env: { ...process.env, BATTLE_LAB_PROFILE: root }, stdio: ['pipe', 'pipe', 'pipe'] });
-      const session = { process: child, lastUse: Date.now(), pending: new Map(), closed: false };
+      let engineProfile = root;
+      if (pack) {
+        const authoring = join(root, 'authoring.json');
+        await writeFile(authoring, JSON.stringify(pack));
+        engineProfile = join(root, 'profile');
+        await executeFile(process.env.BATTLE_LAB_PYTHON || 'python3', [resolve('scripts/native/custom-pack.py'), '--base', resolve(profile), '--out', engineProfile, '--pack', authoring]);
+      } else {
+        await copyFile(join(profile, '.battle-lab-profile'), join(root, '.battle-lab-profile'));
+        await symlink(resolve(profile, 'data'), join(root, 'data'), 'dir');
+      }
+      const child = spawn(resolve(executable), [], { env: { ...process.env, BATTLE_LAB_PROFILE: engineProfile }, stdio: ['pipe', 'pipe', 'pipe'] });
+      const session = { process: child, lastUse: Date.now(), pending: new Map(), closed: false, pack, battle: false, importing: false };
       const fail = () => {
         session.closed = true;
         for (const pending of session.pending.values()) pending.reject(new Error('VCMI connection closed'));
@@ -78,8 +88,33 @@ export function createEngineBridge() {
       let id = envelope.session, session = sessions.get(id);
       if (!id && envelope.request.op === 'catalogue') [id, session] = await openSession();
       if (!session) { reply(409, { error: '引擎会话已结束，请重新连接。' }); return; }
+      if (session.importing) { reply(409, { error: '兵种包正在初始化，请等待导入完成。' }); return; }
       session.lastUse = Date.now();
+      if (envelope.request.op === 'importPack') {
+        if (session.battle || session.pending.size) {
+          reply(200, { session: id, response: { version: 1, ok: false, error: '请先结束战斗并等待当前请求完成，再导入兵种。' } }); return;
+        }
+        const pack = envelope.request.pack;
+        if (pack?.version !== 1 || !Array.isArray(pack.creatures)) throw new Error('Invalid custom pack');
+        const combined = { version: 1, creatures: [...(session.pack?.creatures ?? []), ...pack.creatures] };
+        if (JSON.stringify(combined).length > 1024 * 1024) throw new Error('Combined custom pack exceeds 1 MB');
+        session.importing = true;
+        let candidateId, candidate;
+        try {
+          [candidateId, candidate] = await openSession(combined);
+          const packet = await exchange(candidate, { version: 1, op: 'catalogue' });
+          if (!packet.ok || packet.result.rulesProfile !== 'custom-reference') throw new Error('Custom engine initialization failed');
+          sessions.delete(id); session.process.kill();
+          reply(200, { session: candidateId, response: packet });
+        } catch {
+          if (candidate) { sessions.delete(candidateId); candidate.process.kill(); }
+          reply(200, { session: id, response: { version: 1, ok: false, error: '兵种包未能通过原生加载，原引擎会话已保留。' } });
+        } finally { session.importing = false; }
+        return;
+      }
       const packet = await exchange(session, envelope.request);
+      if (packet.ok && envelope.request.op === 'create') session.battle = true;
+      if (packet.ok && envelope.request.op === 'dispose') session.battle = false;
       reply(200, { session: id, response: packet });
     } catch { reply(502, { error: 'VCMI 接口未能完成请求；请检查本地引擎配置。' }); }
   };
