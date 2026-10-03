@@ -59,7 +59,7 @@ Each source folder contains `holding.blend`, `moving.blend`, `attack_front.blend
 
 ## Boundaries
 
-**Migration direction:** TypeScript will retain GUI, 3D rendering and event playback only. Compiled VCMI will own all combat mechanics and legal actions. An owned native wrapper comes first, followed by the same interface in WASM; VCMI-Gym is optional reference material. See the [engine adapter plan and verified native probe](docs/vcmi-adapter.md). The current TypeScript simulation below remains a temporary demonstration until that backend is connected; new mechanism development belongs in the engine.
+**Migration direction:** TypeScript will retain GUI, 3D rendering and event playback only. Compiled VCMI will own all combat mechanics and legal actions. An owned native wrapper comes first, followed by the same interface in WASM; VCMI-Gym is optional reference material. The separate native smoke test now loads an isolated core/essential-data profile and executes actual server combat with ordered state updates. See the [adapter plan, results and reproduction commands](docs/vcmi-adapter.md). The current TypeScript simulation below remains a temporary demonstration until that backend is connected; new mechanism development belongs in the engine.
 
 | Module | Responsibility |
 | --- | --- |
@@ -87,6 +87,7 @@ Next priority: connect an isolated native VCMI battle backend and replace the Ty
 ```sh
 npm test
 python3 tests/exporter.test.py
+python3 tests/native-profile.test.py
 npm run build
 npx playwright install chromium
 npm run test:e2e
