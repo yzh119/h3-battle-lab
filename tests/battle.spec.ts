@@ -77,7 +77,7 @@ test('clicking the battlefield after a select restores D movement and keeps labe
   expect(after.units.every((u: any) => u.countLabel.depthTest && u.countLabel.visible)).toBe(true);
 });
 
-test('clicking either army shows its native movement range without attacking', async ({ page }) => {
+test('army selection inspects both movement ranges and clicking a legal enemy attacks', async ({ page }) => {
   test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
   await missingArt(page); const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
   await open(page); await expect(page.locator('#start-battle')).toBeEnabled();
@@ -96,13 +96,15 @@ test('clicking either army shows its native movement range without attacking', a
   const initial = await snapshot(page), actor = initial.units.find((u: any) => u.native.id === initial.state.activeStack);
   await redSlot.click(); await page.locator('#closeup').click(); await blueSlot.click();
   const enemy = (await snapshot(page)).units.find((u: any) => u.team === 1);
-  await page.mouse.click(enemy.screen.x, enemy.screen.y);
+  await redSlot.click();
   current = await snapshot(page);
   expect(current.selected).toBe(enemy.id); expect(current.state.revision).toBe(initial.state.revision);
   expect(current.movementRange).toEqual(current.state.units.find((u: any) => u.side === 1).movement);
   await page.screenshot({ path: '.local/selected-enemy-movement-range.png' });
   await expect(page.locator('#attack-selected')).toBeEnabled();
-  await page.locator('#attack-selected').click(); await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+  await page.mouse.click(enemy.screen.x, enemy.screen.y);
+  await expect.poll(async () => (await snapshot(page)).state.revision).toBe(initial.state.revision + 1);
+  await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
   current = await snapshot(page);
   expect(current.state.revision).toBe(initial.state.revision + 1);
   expect(current.state.units.find((u: any) => u.side === 1).health).toBeLessThan(enemy.native.health);
@@ -631,4 +633,64 @@ test('failed imported 3D environment keeps the public scene and controls usable'
   await page.locator('#closeup').click(); expect((await snapshot(page)).camera.enabled).toBe(true);
   await page.locator('#creature-picker').selectOption('archer'); await page.locator('#replace-unit').click();
   expect((await snapshot(page)).units[0].kind).toBe('archer'); expect(errors).toEqual([]);
+});
+
+
+test('native tactics lets either side select stacks, preview deployment and enter the first round', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  await missingArt(page); const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await open(page); await expect(page.locator('#start-battle')).toBeEnabled();
+  for (const side of [0, 1]) {
+    await page.locator('#hero-editor').evaluate(el => el.setAttribute('open', ''));
+    for (const team of [0, 1]) {
+      await page.locator(`#hero-enabled-${team}`).check();
+      await page.locator(`#hero-skill-${team}-0`).selectOption(team === side ? '19' : '');
+      await page.locator(`#hero-skill-level-${team}-0`).selectOption('3');
+    }
+    await expect(page.locator('#start-battle')).toBeEnabled();
+    await page.locator('#start-battle').click(); await expect(page.locator('#end-tactics')).toBeEnabled();
+    await expect(page.locator('#wait-turn')).toBeDisabled(); await expect(page.locator('#defend-turn')).toBeDisabled();
+    const before = await snapshot(page);
+    expect(before.state.tactics.side).toBe(side); expect(before.state.activeStack).toBeNull();
+    const own = before.units.find((unit: any) => unit.native?.side === side);
+    const enemy = before.units.find((unit: any) => unit.native?.side !== side);
+    await page.locator('#unit-picker').selectOption(enemy.id); expect((await snapshot(page)).movementRange).toEqual([]);
+    await page.locator('#unit-picker').selectOption(own.id);
+    const entry = before.state.tactics.stacks.find((stack: any) => stack.id === own.native.id);
+    expect((await snapshot(page)).movementRange).toEqual(entry.movement);
+    for (let i = 0; i < 2; i++) {
+      const current = await snapshot(page);
+      const moves = current.state.tactics.stacks.find((stack: any) => stack.id === own.native.id).moves;
+      const hex = moves[moves.length - 1].hex;
+      await page.evaluate(async (hex: number) => { const { fromHexId } = await import(/* @vite-ignore */ '/src/presentation.ts'); await (window as any).battleLab.move(fromHexId(hex)); }, hex);
+      await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+      const moved = await snapshot(page);
+      expect(moved.units.find((unit: any) => unit.id === own.id).native.hex).toBe(hex);
+      expect(moved.state.round).toBe(before.state.round); expect(moved.selected).toBe(own.id);
+      expect(moved.state.tactics.side).toBe(side);
+    }
+    const deployed = (await snapshot(page)).state.units.map((unit: any) => unit.hex);
+    await page.locator('#end-tactics').click(); await expect(page.locator('#defend-turn')).toBeEnabled();
+    const begun = await snapshot(page);
+    expect(begun.state.tactics).toBeUndefined(); expect(begun.state.round).toBe(1);
+    expect(begun.state.units.map((unit: any) => unit.hex)).toEqual(deployed);
+    await expect(page.locator('#end-tactics')).toBeHidden();
+    await page.locator('#reset').click(); await expect(page.locator('#start-battle')).toBeEnabled();
+  }
+  expect(errors).toEqual([]);
+});
+
+test('VCMI AI deploys during tactics before normal automatic battle turns', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  await missingArt(page); await open(page); await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#hero-editor').evaluate(el => el.setAttribute('open', ''));
+  await page.locator('#hero-enabled-0').check(); await page.locator('#hero-skill-0-0').selectOption('19');
+  await page.locator('#hero-skill-level-0-0').selectOption('3');
+  await expect(page.locator('#start-battle')).toBeEnabled(); await page.locator('#ai-blue').check();
+  await page.locator('#start-battle').click();
+  await expect.poll(async () => (await snapshot(page)).state?.revision ?? -1).toBeGreaterThanOrEqual(1);
+  await page.locator('#ai-blue').uncheck();
+  await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+  expect((await snapshot(page)).state.tactics).toBeUndefined();
+  expect((await snapshot(page)).state.round).toBeGreaterThanOrEqual(1);
 });

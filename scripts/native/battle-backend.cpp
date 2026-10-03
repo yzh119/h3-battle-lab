@@ -6,10 +6,12 @@
 #include "lib/entities/hero/CHeroClass.h"
 #include "lib/entities/artifact/CArtHandler.h"
 #include "AI/BattleAI/BattleAI.h"
+#include "AI/BattleAI/TacticsHandler.h"
 #include "lib/mapObjects/CGTownInstance.h"
 #include "lib/battle/ReachabilityInfo.h"
 #include "server/queries/BattleQueries.h"
 #include "server/queries/QueriesProcessor.h"
+#include "server/battles/BattleFlowProcessor.h"
 #include "AI/BattleAI/BattleEvaluator.h"
 #include "lib/callback/CBattleCallback.h"
 #include "lib/battle/CPlayerBattleCallback.h"
@@ -35,8 +37,11 @@ class AICallback final : public CBattleCallback
 {
 public:
     std::optional<BattleAction> spellAction;
+    std::optional<BattleAction> tacticsAction;
     explicit AICallback(PlayerColor player) : CBattleCallback(player, nullptr) {}
     void battleMakeSpellAction(const BattleID &, const BattleAction & action) override { spellAction = action; }
+    void battleMakeTacticAction(const BattleID &, const BattleAction & action) override { tacticsAction = action; }
+    void battleMakeUnitAction(const BattleID &, const BattleAction & action) override { tacticsAction = action; }
 };
 
 void fields(const JsonNode & value, std::initializer_list<std::string> allowed)
@@ -425,7 +430,7 @@ public:
             }
         if (!armyObjects[BattleSide::ATTACKER] || !armyObjects[BattleSide::DEFENDER]) throw std::runtime_error("Missing army objects");
         BattleLayout layout = BattleLayout::createDefaultLayout(*game, armyObjects[BattleSide::ATTACKER], armyObjects[BattleSide::DEFENDER]);
-        layout.obstaclesAllowed = obstacles; layout.tacticsAllowed = false;
+        layout.obstaclesAllowed = obstacles; layout.tacticsAllowed = true;
         for (const auto side : {BattleSide::ATTACKER, BattleSide::DEFENDER})
         {
             const auto & stacks = armies.Vector().at(static_cast<int>(side)).Vector();
@@ -460,9 +465,8 @@ public:
         handler->sendAndApply(begin);
         auto & battle = *game->currentBattles.front();
         handler->queries->addQuery(std::make_shared<CBattleQuery>(handler.get(), &battle));
-        battle.tacticDistance = 1; battle.tacticsSide = BattleSide::ATTACKER;
-        if (!handler->battles->makePlayerBattleAction(BattleID(0), PlayerColor(0), BattleAction::makeEndOFTacticPhase(BattleSide::ATTACKER)))
-            throw std::runtime_error("Failed to begin battle");
+        BattleFlowProcessor flow(handler->battles.get(), handler.get());
+        flow.onBattleStarted(battle);
     }
 
     JsonNode state() const
@@ -476,6 +480,31 @@ public:
         for (auto & unit : result["units"].Vector()) unit["movement"].Vector();
         if (game->currentBattles.empty() || !result["winner"].isNull()) return result;
         const auto & battle = *game->currentBattles.front();
+        if (battle.battleTacticDist())
+        {
+            result["activeStack"].clear();
+            auto & tactics = result["tactics"];
+            tactics["side"].Integer() = static_cast<int>(battle.battleGetTacticsSide());
+            tactics["distance"].Integer() = battle.battleTacticDist();
+            tactics["stacks"].Vector();
+            for (const auto * stack : battle.battleGetAllStacks())
+            {
+                if (!stack->alive() || stack->unitSide() != battle.battleGetTacticsSide() || stack->unitSlot() == SlotID::WAR_MACHINES_SLOT) continue;
+                JsonNode entry; entry["id"].Integer() = stack->unitId(); entry["moves"].Vector(); entry["movement"].Vector();
+                const auto available = battle.battleGetAvailableHexes(stack, false);
+                for (const auto & hex : battle.battleGetOccupiableHexes(available, stack)) entry["movement"].Vector().emplace_back(hex.toInt());
+                for (const auto & hex : available)
+                {
+                    if (hex == stack->getPosition()) continue;
+                    JsonNode move; move["hex"].Integer() = hex.toInt();
+                    const auto path = battle.getPath(stack->getPosition(), hex, stack).first;
+                    for (auto it = path.rbegin(); it != path.rend(); ++it) move["path"].Vector().emplace_back(it->toInt());
+                    entry["moves"].Vector().push_back(std::move(move));
+                }
+                tactics["stacks"].Vector().push_back(std::move(entry));
+            }
+            return result;
+        }
         // Inspection is available for either side, independently of whose turn
         // it is. Native reachability includes obstacles, spells and wide bodies.
         for (const auto * stack : battle.battleGetAllStacks())
@@ -530,6 +559,7 @@ public:
         fields(request, {"version", "requestId", "op", "revision", "stack", "spell", "caster"});
         if (integer(request["revision"], 0, INT64_MAX) != revision || game->currentBattles.empty()) throw std::runtime_error("Stale or ended battle");
         const auto & battle = *game->currentBattles.front();
+        if (battle.battleTacticDist()) throw std::runtime_error("Spells unavailable during tactics");
         const auto * actor = battle.battleActiveUnit();
         if (!actor || integer(request["stack"], 0, INT32_MAX) != actor->unitId()) throw std::runtime_error("Stack is not active");
         if (!request["caster"].isNull() && (!request["caster"].isString() || (request["caster"].String() != "hero" && request["caster"].String() != "creature"))) throw std::runtime_error("Unsupported caster");
@@ -574,6 +604,49 @@ public:
         const auto current = state();
         if (game->currentBattles.empty() || !current["winner"].isNull()) throw std::runtime_error("Battle has ended");
         const auto & battle = *game->currentBattles.front();
+        if (battle.battleTacticDist())
+        {
+            if (!request["action"].isString()) throw std::runtime_error("Missing action");
+            const auto & action = request["action"].String();
+            const auto side = battle.battleGetTacticsSide();
+            BattleAction native;
+            if (action == "ai")
+            {
+                auto callback = std::make_shared<AICallback>(battle.sideToPlayer(side));
+                callback->onBattleStarted(&battle);
+                TacticsHandler tactics(callback, BattleID(0), TacticsHandler::Settings{});
+                server.events.clear();
+                tactics.onTacticsStarted();
+                // Execute each upstream decision against live state before the
+                // handler chooses its next deployment, just as the VCMI client does.
+                while (callback->tacticsAction)
+                {
+                    native = *callback->tacticsAction; callback->tacticsAction.reset();
+                    if (!handler->battles->makePlayerBattleAction(BattleID(0), battle.sideToPlayer(side), native)) throw std::runtime_error("Engine rejected AI tactics action");
+                    if (!battle.battleTacticDist()) break;
+                    tactics.onActionFinished(native);
+                }
+                ++revision;
+                JsonNode response; response["state"] = state(); response["events"].Vector() = server.events;
+                return response;
+            }
+            else if (action == "endTactics") native = BattleAction::makeEndOFTacticPhase(side);
+            else if (action == "tacticsMove")
+            {
+                const int id = integer(request["stack"], 0, INT32_MAX), hex = integer(request["hex"], 0, 186);
+                bool found = false;
+                for (const auto & entry : current["tactics"]["stacks"].Vector())
+                    if (entry["id"].Integer() == id) for (const auto & move : entry["moves"].Vector()) if (move["hex"].Integer() == hex) found = true;
+                if (!found) throw std::runtime_error("Illegal tactics destination or stack");
+                native = BattleAction::makeMove(battle.battleGetStackByID(id), BattleHex(hex));
+            }
+            else throw std::runtime_error("Only deployment actions are available during tactics");
+            server.events.clear();
+            if (!handler->battles->makePlayerBattleAction(BattleID(0), battle.sideToPlayer(side), native)) throw std::runtime_error("Engine rejected tactics action");
+            ++revision;
+            JsonNode response; response["state"] = state(); response["events"].Vector() = server.events;
+            return response;
+        }
         const auto * actor = battle.battleActiveUnit();
         if (!actor || integer(request["stack"], 0, INT32_MAX) != actor->unitId()) throw std::runtime_error("Stack is not active");
         if (!request["action"].isString()) throw std::runtime_error("Missing action");

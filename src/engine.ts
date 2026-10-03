@@ -8,6 +8,7 @@ export interface NativeUnit {
   speed: number; flying: boolean; footprint: number[]; movement?: number[];
 }
 export interface EngineState {
+  tactics?: { side: number; distance: number; stacks: { id: number; movement: number[]; moves: { hex: number; path: number[] }[] }[] };
   scenario?: ScenarioConfig;
   revision: number; round: number; activeStack: number | null; winner?: number | null;
   heroes?: (NativeHero | null)[]; units: NativeUnit[]; obstacles: number[]; queue?: number[];

@@ -45,6 +45,91 @@ class NativeBackendTests(unittest.TestCase):
         self.assertTrue(response["ok"], response.get("error"))
         return response["result"]
 
+    def tactics_battle(self, left_level, right_level):
+        heroes = [dict(attack=0, defense=0, power=0, knowledge=1, skills=[dict(id=19, level=level)] if level else [], spells=[]) for level in [left_level, right_level]]
+        response = self.request('create', seed=1337,
+            armies=[[dict(creature=10, count=20), dict(creature=0, count=20)], [dict(creature=69, count=20), dict(creature=58, count=20)]],
+            heroes=heroes, scenario=dict(terrain=2, battlefield='core:grass_hills', obstacles=True, layout=148))
+        self.assertTrue(response['ok'], response.get('error'))
+        return response['result']['state']
+
+    def test_tactics_advantage_levels_and_cancellation(self):
+        for left, right, side, distance in [(1, 0, 0, 3), (2, 0, 0, 5), (3, 0, 0, 7), (3, 1, 0, 5), (1, 3, 1, 5), (0, 2, 1, 5)]:
+            state = self.tactics_battle(left, right)
+            self.assertEqual(state['tactics']['side'], side)
+            self.assertEqual(state['tactics']['distance'], distance)
+            self.assertIsNone(state['activeStack'])
+            self.assertEqual(state['queue'], [])
+            self.assertFalse(state['legal']['wait'])
+            self.assertFalse(state['legal']['defend'])
+            self.assertEqual(state['legal']['shots'], [])
+            ended = self.act(state, 'endTactics')['state']
+            self.assertNotIn('tactics', ended)
+            self.assertEqual(ended['round'], 1)
+            self.assertIsInstance(ended['activeStack'], int)
+            self.assertTrue(ended['legal']['defend'])
+        for level in [0, 1, 2, 3]:
+            state = self.tactics_battle(level, level)
+            self.assertNotIn('tactics', state)
+            self.assertEqual(state['round'], 1)
+
+    def test_native_ai_finishes_tactics_then_uses_normal_battle_actions(self):
+        for left, right in [(3, 0), (0, 3)]:
+            state = self.tactics_battle(left, right)
+            ended = self.act(state, 'ai')['state']
+            self.assertNotIn('tactics', ended)
+            self.assertEqual(ended['round'], 1)
+            self.assertEqual(ended['revision'], 1)
+            self.assertEqual([u['health'] for u in ended['units']], [u['health'] for u in state['units']])
+            occupied = [h for u in ended['units'] for h in u['footprint']]
+            self.assertEqual(len(occupied), len(set(occupied)))
+            self.assertTrue(set(occupied).isdisjoint(ended['obstacles']))
+            self.assertEqual(self.act(ended, 'ai')['state']['revision'], 2)
+
+    def test_native_ai_tactics_repositions_shooters_and_guards(self):
+        for side in [0, 1]:
+            heroes = [dict(attack=0, defense=0, power=0, knowledge=1, skills=[dict(id=19, level=3)] if team == side else [], spells=[]) for team in [0, 1]]
+            armies = [[dict(creature=3, count=50), dict(creature=0, count=50), dict(creature=6, count=30)], [dict(creature=3, count=50), dict(creature=0, count=50), dict(creature=6, count=30)]]
+            created = self.request('create', seed=1337, armies=armies, heroes=heroes)
+            self.assertTrue(created['ok'], created.get('error'))
+            before = created['result']['state']
+            result = self.act(before, 'ai')
+            self.assertNotIn('tactics', result['state'])
+            self.assertTrue(any(event['type'] == 'move' for event in result['events']))
+            self.assertNotEqual([u['hex'] for u in before['units']], [u['hex'] for u in result['state']['units']])
+            self.assertEqual([u['health'] for u in before['units']], [u['health'] for u in result['state']['units']])
+
+    def test_tactics_repeated_moves_occupancy_and_invalid_actions(self):
+        for left, right in [(3, 0), (0, 3)]:
+            state = self.tactics_battle(left, right)
+            side = state['tactics']['side']
+            for entry in state['tactics']['stacks']:
+                unit = next(u for u in state['units'] if u['id'] == entry['id'])
+                self.assertEqual(unit['side'], side)
+                blocked = set(state['obstacles']) | {h for u in state['units'] if u['id'] != unit['id'] for h in u['footprint']}
+                self.assertTrue(set(entry['movement']).isdisjoint(blocked))
+                self.assertTrue(all(move['path'][-1] == move['hex'] for move in entry['moves']))
+            enemy = next(u for u in state['units'] if u['side'] != side)
+            own = state['tactics']['stacks'][0]
+            for action, options in [('defend', {}), ('wait', {}), ('spell', dict(spell=54, targets=[])), ('tacticsMove', dict(stack=enemy['id'], hex=own['moves'][0]['hex'])), ('tacticsMove', dict(stack=own['id'], hex=enemy['hex']))]:
+                self.assertFalse(self.request('act', revision=state['revision'], action=action, **{'stack': None, **options})['ok'])
+                self.assertEqual(self.request('state')['result']['state'], state)
+            for _ in range(2):
+                entry = next(e for e in state['tactics']['stacks'] if e['id'] == own['id'])
+                destination = entry['moves'][-1]['hex']
+                response = self.request('act', revision=state['revision'], stack=entry['id'], action='tacticsMove', hex=destination)
+                self.assertTrue(response['ok'], response.get('error'))
+                moved = response['result']['state']
+                self.assertEqual(moved['revision'], state['revision'] + 1)
+                self.assertEqual(moved['round'], state['round'])
+                self.assertEqual(next(u for u in moved['units'] if u['id'] == entry['id'])['hex'], destination)
+                self.assertEqual([u['health'] for u in moved['units']], [u['health'] for u in state['units']])
+                self.assertTrue(any(e['type'] == 'move' for e in response['result']['events']))
+                state = moved
+            ended = self.act(state, 'endTactics')['state']
+            self.assertEqual([u['hex'] for u in ended['units']], [u['hex'] for u in state['units']])
+            self.assertFalse(self.request('act', revision=ended['revision'], stack=ended['activeStack'], action='endTactics')['ok'])
+
     def test_roster_and_ranged_events_rejections_do_not_advance_state(self):
         catalogue = self.request("catalogue")["result"]
         self.assertEqual(len(catalogue["creatures"]), 28)
