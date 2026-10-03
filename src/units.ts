@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
-import { type Unit } from './battle.ts';
+import { type VisualUnit as Unit } from './presentation.ts';
 import { worldPosition } from './world.ts';
 
 export interface Asset { label: string; url: string; height?: number; faction?: string; draft?: boolean }

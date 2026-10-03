@@ -2,7 +2,7 @@
 
 The agreed direction is to keep TypeScript for GUI, Three.js rendering and event playback. All combat mechanics—including pathfinding, occupancy, initiative, damage, retaliation, ammunition, creature abilities, heroes and spells—must be computed by compiled VCMI. No second combat implementation should remain in TypeScript after migration. VCMI-Gym is a reference, not a required dependency.
 
-The viewer currently still runs its independent TypeScript simulation. It is a temporary demonstration, not a connected VCMI backend or complete original H3 combat. A separate native smoke test now initializes the actual library and executes server combat. Existing frontend mechanisms stay available during migration; further mechanism development belongs in the native engine. Procedural artwork fallback will remain; silently falling back to different combat rules will not.
+The browser is connected to an owned native JSON-lines backend through the local Vite server. The TypeScript battle simulation has been removed. Without an engine/profile, army editing and model inspection remain available while combat is disabled. No alternate combat-rule fallback is used.
 
 Start with an owned native wrapper so resource initialization, custom armies and complete battle events can be validated independently of browser compilation. A later WASM build should implement the same protocol. Original H3 base behavior remains the target: reference differences must be handled in the engine's isolated rules profile, not compensated for by frontend damage or turn logic.
 
@@ -38,7 +38,9 @@ Verified locally:
 - A seeded battle executes through `BattleProcessor::makePlayerBattleAction`. Twenty Marksmen shoot twenty Walking Dead twice, consuming two arrows. The captured attacks deal 55 and 54 damage; the target ends at 191 HP / 13 creatures and becomes active.
 - Each captured native message has authoritative before/after state. Independent runs with seed 1337 produce identical output; the verifier checks ammo, casualty accounting, message continuity and turn advancement.
 
-The prototype only exposes a fixed ranged scenario. It has no frontend transport, general custom-army requests, hero-spell event normalization or WASM build yet. Captured unknown native messages are retained as diagnostic updates; this is not the final event protocol. The game-handler boundary follows VCMI's server battle test fixture rather than implementing combat in the wrapper.
+The generic backend now accepts both armies (up to seven stacks each) from all 28 original Castle/Necropolis definitions. Actual engine integration tests cover default and explicit deployment, double-wide occupancy, legal movement, waiting, defense, ranged double attacks, melee/retaliation/extra strikes, rejected stale/illegal requests, atomic failed creation, victory cleanup and a fresh battle. Browser tests connect through the real HTTP transport with artwork intentionally missing, check damage playback at impact, compare the displayed final state with the native response and exercise defense/reset. Optional local GLB tests also verify animated bone transforms.
+
+This is still a limited interface: no fighting heroes or spell commands, configurable terrain/obstacles, custom creature conversion or WASM. The battlefield is fixed sand without obstacles. Unknown native messages remain generic authoritative updates; some creature abilities will need richer visual events and dedicated tests. This evidence does not establish full original H3 parity.
 
 For an existing compatible macOS Ninja build, bootstrap an owned derivative without rebuilding or modifying the upstream tree:
 
@@ -84,13 +86,31 @@ Keep one versioned authoring format for creature stats, declarative mechanisms a
 
 The backend must advertise supported mechanisms and reject unsupported fields explicitly. Compose existing VCMI mechanisms through data; implement new behavior in engine code or engine scripts, extending the translator and schema together. Do not implement the same mechanism in TypeScript. Original and custom profiles must remain distinguishable, and custom packs must not silently override base creatures. Art remains optional and separate from rules.
 
-## Implementation order
+## Current JSON-lines interface
 
-1. Replace the local relink bootstrap with a dedicated pinned source build. Keep the verified owned resource/profile boundary and explicit base-data allowlist; original sources, art and user profiles stay untouched.
-2. Generalize the verified real server smoke test into custom-army battle creation and versioned requests. `BattleInfo::setupBattle` constructs state, but action processing also needs the initialized game-handler context used by the probe.
-3. Capture ordered updates and replay them through Three.js. Verify seeded movement, melee/retaliation and shooting against original H3 behavior. Known reference differences such as regeneration timing belong in the engine profile.
-4. Replace the frontend controller and remove TypeScript combat calculations. Keep only coordinate conversion, input/state validation, presentation state and event playback. Move rule tests to the engine boundary; retain browser tests for rendering and interaction.
-5. Compile the same wrapper with Emscripten. Filesystem initialization, platform paths, threads/condition variables, dynamic libraries and scripting dependencies need explicit browser support. No WASM build has been demonstrated yet.
+Build the general service with `build-battle-probe.py --backend`, using the same source/build/core/dependency arguments above. Set `BATTLE_LAB_BACKEND` to the resulting executable and `BATTLE_LAB_PROFILE` to the prepared profile when starting `npm run dev`. This backend is currently available only through the development server, not static hosting or `vite preview`.
+
+Each line is one JSON request `{ "version": 1, "requestId": "unique-id", "op": "catalogue" }`. Responses echo the version and ID, with `ok` and `result` or `error`.
+
+| Operation | Fields and response |
+| --- | --- |
+| `catalogue` | Original creature IDs/data, `backend`, `rulesProfile`, `customPacks: false`, `heroSpells: false` |
+| `create` | `seed` (0–2³¹−1), `armies` (two arrays of 1–7 `{creature,count,hex?}`); native initial state/events |
+| `state` | Current authoritative state |
+| `act` | `revision`, active `stack`, `action`: `wait`, `defend`, `move` (+`hex`), `shoot` (+`target`), `melee` (+`target`,`from`) |
+| `dispose` | Releases the battle; the process can create another |
+
+Original IDs are 0–13 and 56–69. Counts are 1–99,999. Deployment hexes are optional; the engine supplies default formation and double-wide adjustments. State contains native units/footprints, counts/health/ammo, round, winner, queue and legal actions with native paths. Actions return ordered messages containing before/after state, followed by final state with the next revision. The wrapper validates actions against native legal options before mutating state. Failed creation preserves the prior battle.
+
+The local HTTP envelope is `{session?,request}` at `/api/engine`, with `{session,response}` returned. A first `catalogue` without a session creates a process. Each browser session owns a private writable profile; its data directory points at the prepared resources. No combat code runs in the HTTP bridge. Do not expose this development process launcher as a public service.
+
+## Remaining implementation
+
+1. Replace the local relink bootstrap with a pinned dedicated source build; upstream files remain untouched.
+2. Add fighting heroes, skill/spell commands, configurable terrain/obstacles and richer effect events; verify remaining creature abilities and original H3 differences in the engine.
+3. Translate the versioned custom-creature format into isolated VCMI definitions/bonuses/scripts. Advertise only verified engine capabilities.
+4. Integrate and review the remaining latest private models.
+5. Compile the same wrapper with Emscripten. Platform paths, filesystems, threading, dynamic libraries and scripting need browser support. No WASM build has been demonstrated.
 
 VCMI-Gym's Python/pybind11 environment and threaded connector are native references, not a browser backend. Its action subset also does not establish hero-spell support or ordered animation events for this viewer.
 

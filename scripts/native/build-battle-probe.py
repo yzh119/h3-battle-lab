@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 
 
-def build(source, upstream_build, core, output, dependency_include, dependency_lib):
+def build(source, upstream_build, core, output, dependency_include, dependency_lib, backend=False):
     source, upstream_build, core, output = map(lambda p: Path(p).resolve(), (source, upstream_build, core, output))
     if output.exists():
         raise ValueError("Output already exists; use a new directory")
@@ -22,12 +22,14 @@ def build(source, upstream_build, core, output, dependency_include, dependency_l
         target = output / name
         target.write_text(code.replace('#include "StdInc.h"', '#include "Global.h"'))
         copies.append(str(target))
-    includes = [source, source / "include", source / "lib", helpers, Path(dependency_include)]
+    includes = [source, source / "include", source / "lib", source / "server", helpers, Path(dependency_include)]
+    target_name = "battle-backend" if backend else "battle-probe"
     command = ["c++", "-std=c++20", *[f"-I{p}" for p in includes],
-        str(Path(__file__).with_name("battle-probe.cpp").resolve()), *copies,
+        str(Path(__file__).with_name(target_name + ".cpp").resolve()), *copies,
+        *([str(source / "lib/json/JsonParser.cpp")] if backend else []),
         str(upstream_build / "bin/libvcmiservercommon.a"), f"-L{core}", "-lvcmi-battle-lab",
         f"-L{dependency_lib}", "-lboost_filesystem", "-lboost_program_options", "-lz",
-        f"-Wl,-rpath,{core}", "-o", str(output / "battle-probe")]
+        f"-Wl,-rpath,{core}", "-o", str(output / target_name)]
     subprocess.run(command, check=True)
 
 
@@ -39,5 +41,6 @@ if __name__ == "__main__":
     parser.add_argument("--out", required=True)
     parser.add_argument("--dependency-include", required=True)
     parser.add_argument("--dependency-lib", required=True)
+    parser.add_argument("--backend", action="store_true", help="Build the JSON-lines battle service")
     args = parser.parse_args()
-    build(args.vcmi_source, args.vcmi_build, args.core, args.out, args.dependency_include, args.dependency_lib)
+    build(args.vcmi_source, args.vcmi_build, args.core, args.out, args.dependency_include, args.dependency_lib, args.backend)

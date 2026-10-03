@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { cells, isPlayable, key, obstacles, type Hex } from './battle.ts';
+import { cells, isPlayable, key, fromHexId, type Hex } from './presentation.ts';
 
 export const RADIUS = 1.18;
 export function worldPosition(h: Hex): THREE.Vector3 {
@@ -19,7 +19,7 @@ export function createWorld(canvas: HTMLCanvasElement) {
   const camera = new THREE.PerspectiveCamera(42, 1, .1, 180);
   const controls = new OrbitControls(camera, canvas); controls.enableDamping = true;
   controls.minDistance = 3.5; controls.maxDistance = 65; controls.maxPolarAngle = Math.PI / 2 - .045;
-  controls.target.set(0, .8, 0); camera.position.set(12, 19, 27);
+  controls.target.set(0, .8, 0); camera.position.set(12, 26, 40);
   controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE; controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
   const ambient = new THREE.HemisphereLight('#d6e5ee', '#66513a', 1.25); scene.add(ambient);
   const sun = new THREE.DirectionalLight('#ffe0a4', 3.2); sun.position.set(-16, 28, 13); sun.castShadow = true;
@@ -64,7 +64,14 @@ export function createWorld(canvas: HTMLCanvasElement) {
   function rock(x: number, z: number, size: number) {
     const m = new THREE.Mesh(rockGeo, rockMat); m.position.set(x, size * .3, z); m.scale.set(size, size * .62, size * .85); m.rotation.set(rng(), rng() * 6, rng()); m.castShadow = true; m.receiveShadow = true; scenery.add(m); return m;
   }
-  for (const cell of cells.filter(c => obstacles.has(key(c)))) { const p = worldPosition(cell); scene.add(rock(p.x, p.z, .95)); }
+  const obstacleGroup = new THREE.Group(); scenery.add(obstacleGroup);
+  function setObstacles(hexes: number[]) {
+    obstacleGroup.clear();
+    for (const id of new Set(hexes)) {
+      const p = worldPosition(fromHexId(id)), m = new THREE.Mesh(rockGeo, rockMat);
+      m.position.set(p.x, .3, p.z); m.scale.set(1, .62, .85); m.castShadow = true; m.receiveShadow = true; obstacleGroup.add(m);
+    }
+  }
   const trunk = new THREE.CylinderGeometry(.1, .16, 2.1, 6), foliage = new THREE.ConeGeometry(1.2, 3.2, 7);
   const bark = new THREE.MeshStandardMaterial({ color: '#514638', roughness: 1 });
   const leaf = new THREE.MeshStandardMaterial({ color: '#384c3b', roughness: .95 });
@@ -137,11 +144,11 @@ export function createWorld(canvas: HTMLCanvasElement) {
   function resetCamera() {
     camera.zoom = 1; if (backdrop) { backdrop.repeat.setScalar(1); backdrop.offset.setScalar(0); } camera.updateProjectionMatrix();
     if (plateMode) { camera.position.set(0, 26, 32); controls.target.set(0, 0, 0); camera.lookAt(controls.target); }
-    else { camera.position.set(12, 19, 27); controls.target.set(0, .8, 0); controls.update(); }
+    else { camera.position.set(12, 26, 40); controls.target.set(0, .8, 0); controls.update(); }
   }
   function setMood(dusk: boolean) {
     const bg = dusk ? '#66788a' : '#9aa79f'; if (!plateMode) scene.background = new THREE.Color(bg); scene.fog?.color.set(bg);
     sun.color.set(dusk ? '#bacfea' : '#ffe0a4'); sun.intensity = dusk ? 1.8 : 3.2; ambient.intensity = dusk ? .8 : 1.25;
   }
-  return { renderer, scene, camera, controls, grid, pickable, hover, showPath, frameUnit, resetCamera, setMood, sun, zoomBy, setBackdrop, freeCamera, isBackdrop: () => plateMode };
+  return { renderer, scene, camera, controls, grid, pickable, hover, showPath, setObstacles, frameUnit, resetCamera, setMood, sun, zoomBy, setBackdrop, freeCamera, isBackdrop: () => plateMode };
 }
