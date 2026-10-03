@@ -9,6 +9,7 @@
 #include "AI/BattleAI/BattleEvaluator.h"
 #include "lib/callback/CBattleCallback.h"
 #include "lib/battle/CPlayerBattleCallback.h"
+#include "lib/spells/ISpellMechanics.h"
 #include <cmath>
 
 class AIEnvironment final : public Environment
@@ -20,6 +21,16 @@ public:
     const Services * services() const override { return LIBRARY; }
     const BattleCb * battle(const BattleID & id) const override { return callback->getBattle(id).get(); }
     const GameCb * game() const override { return &gameState; }
+};
+
+// AI evaluates against engine callbacks; capture its choice instead of sending
+// through a graphical VCMI client. Execution stays in BattleProcessor below.
+class AICallback final : public CBattleCallback
+{
+public:
+    std::optional<BattleAction> spellAction;
+    explicit AICallback(PlayerColor player) : CBattleCallback(player, nullptr) {}
+    void battleMakeSpellAction(const BattleID &, const BattleAction & action) override { spellAction = action; }
 };
 
 void fields(const JsonNode & value, std::initializer_list<std::string> allowed)
@@ -81,7 +92,19 @@ JsonNode catalogue()
     result["backend"].String() = "vcmi-native";
     result["rulesProfile"].String() = "base-reference";
     result["customPacks"].Bool() = false;
-    result["heroSpells"].Bool() = false;
+    result["heroSpells"].Bool() = true;
+    for (const auto & spell : LIBRARY->spellh->objects)
+    {
+        if (spell->getId().getNum() >= 70 || !spell->isCombat() || spell->isCreatureAbility()) continue;
+        JsonNode entry; entry["id"].Integer() = spell->getId().getNum(); entry["label"].String() = spell->getNameTranslated();
+        entry["key"].String() = spell->getJsonKey(); entry["level"].Integer() = spell->getLevel();
+        result["spells"].Vector().push_back(std::move(entry));
+    }
+    for (int id = 0; id < 28; ++id)
+    {
+        JsonNode skill; skill["id"].Integer() = id; skill["label"].String() = SecondarySkill(id).toSkill()->getNameTranslated();
+        result["skills"].Vector().push_back(std::move(skill));
+    }
     result["battleAI"].String() = "VCMI BattleEvaluator";
     result["tenWeekTownArmies"] = tenWeekTownArmies();
     for (int id = 0; id < 70; ++id)
@@ -115,7 +138,7 @@ public:
 
     explicit BattleSession(const JsonNode & request)
     {
-        fields(request, {"version", "requestId", "op", "seed", "armies"});
+        fields(request, {"version", "requestId", "op", "seed", "armies", "heroes"});
         const auto seed = integer(request["seed"], 0, 2147483647);
         JsonNode armies = request["armies"];
         if (!armies.isVector() || armies.Vector().size() != 2) throw std::runtime_error("Two armies required");
@@ -138,6 +161,29 @@ public:
                     throw std::runtime_error("Unavailable deployment hex");
             }
             std::sort(army.Vector().begin(), army.Vector().end(), [](const JsonNode & left, const JsonNode & right) { return left["slot"].Integer() < right["slot"].Integer(); });
+        }
+        const auto & heroes = request["heroes"];
+        if (!heroes.isNull() && (!heroes.isVector() || heroes.Vector().size() != 2)) throw std::runtime_error("Two hero configurations required");
+        if (!heroes.isNull()) for (const auto & hero : heroes.Vector())
+        {
+            if (hero.isNull()) continue;
+            fields(hero, {"attack", "defense", "power", "knowledge", "mana", "skills", "spells"});
+            for (const auto * attribute : {"attack", "defense", "power", "knowledge"}) integer(hero[attribute], 0, 99);
+            if (!hero["mana"].isNull()) integer(hero["mana"], 0, 99999);
+            if (!hero["skills"].isVector() || hero["skills"].Vector().size() > 8) throw std::runtime_error("At most eight secondary skills");
+            std::set<int> skills;
+            for (const auto & skill : hero["skills"].Vector())
+            {
+                fields(skill, {"id", "level"}); const int id = integer(skill["id"], 0, 27); integer(skill["level"], 1, 3);
+                if (!skills.insert(id).second) throw std::runtime_error("Duplicate secondary skill");
+            }
+            if (!hero["spells"].isVector() || hero["spells"].Vector().size() > 70) throw std::runtime_error("Spell list required");
+            std::set<int> spells;
+            for (const auto & id : hero["spells"].Vector())
+            {
+                const auto * spell = SpellID(integer(id, 0, 69)).toSpell();
+                if (!spell->isCombat() || spell->isCreatureAbility() || !spells.insert(id.Integer()).second) throw std::runtime_error("Original combat spells only; no duplicates");
+            }
         }
         TinyH3M::TinyH3MBuilder builder(EMapFormat::SOD);
         builder.size(36).name("BattleLab").playerActive(PlayerColor(0)).playerActive(PlayerColor(1))
@@ -163,6 +209,20 @@ public:
             {
                 const auto side = hero->getOwner() == PlayerColor(0) ? BattleSide::ATTACKER : BattleSide::DEFENDER;
                 neutralize(*hero); hero->clearSlots();
+                if (!heroes.isNull() && !heroes.Vector().at(static_cast<int>(side)).isNull())
+                {
+                    const auto & config = heroes.Vector().at(static_cast<int>(side));
+                    hero->setPrimarySkill(PrimarySkill::ATTACK, config["attack"].Integer(), ChangeValueMode::ABSOLUTE);
+                    hero->setPrimarySkill(PrimarySkill::DEFENSE, config["defense"].Integer(), ChangeValueMode::ABSOLUTE);
+                    hero->setPrimarySkill(PrimarySkill::SPELL_POWER, config["power"].Integer(), ChangeValueMode::ABSOLUTE);
+                    hero->setPrimarySkill(PrimarySkill::KNOWLEDGE, config["knowledge"].Integer(), ChangeValueMode::ABSOLUTE);
+                    for (const auto & skill : config["skills"].Vector()) hero->setSecSkillLevel(SecondarySkill(skill["id"].Integer()), skill["level"].Integer(), ChangeValueMode::ABSOLUTE);
+                    hero->removeAllSpells();
+                    for (const auto & spell : config["spells"].Vector()) hero->addSpellToSpellbook(SpellID(spell.Integer()));
+                    if (!hero->getArt(ArtifactPosition::SPELLBOOK)) hero->putArtifact(ArtifactPosition::SPELLBOOK, game->createArtifact(ArtifactID::SPELLBOOK));
+                    hero->mana = config["mana"].isNull() ? hero->manaLimit() : config["mana"].Integer();
+                    if (hero->mana > hero->manaLimit()) throw std::runtime_error("Mana exceeds native hero limit");
+                }
                 const auto & stacks = armies.Vector().at(static_cast<int>(side)).Vector();
                 for (size_t slot = 0; slot < stacks.size(); ++slot)
                     hero->setCreature(SlotID(stacks[slot]["slot"].Integer()), CreatureID(stacks[slot]["creature"].Integer()), stacks[slot]["count"].Integer());
@@ -184,9 +244,12 @@ public:
         const auto field = LIBRARY->identifiers()->getIdentifier(ModScope::scopeGame(), "battlefield", fieldName);
         if (!field) throw std::runtime_error("Missing neutral battlefield");
         BattleSideArray<const CArmedInstance *> nativeArmies = {armyObjects[BattleSide::ATTACKER], armyObjects[BattleSide::DEFENDER]};
-        // Army containers are on a real map. No fighting heroes are granted in this first interface.
+        // Army containers are on a real map; fighting heroes are explicitly opt-in.
         BattleStart begin; begin.battleID = BattleID(0);
-        begin.info = BattleInfo::setupBattle(game.get(), {4, 4, 0}, TerrainId::SAND, BattleField(*field), nativeArmies, {nullptr, nullptr}, layout, nullptr);
+        BattleSideArray<const CGHeroInstance *> fightingHeroes = {nullptr, nullptr};
+        if (!heroes.isNull()) for (const auto side : {BattleSide::ATTACKER, BattleSide::DEFENDER})
+            if (!heroes.Vector().at(static_cast<int>(side)).isNull()) fightingHeroes[side] = armyObjects[side];
+        begin.info = BattleInfo::setupBattle(game.get(), {4, 4, 0}, TerrainId::SAND, BattleField(*field), nativeArmies, fightingHeroes, layout, nullptr);
         std::set<int> occupied;
         // Let the engine place default double-wide formations. Explicit locations
         // must be honored exactly rather than silently relocated by getAvailableHex.
@@ -252,9 +315,47 @@ public:
         return result;
     }
 
+    JsonNode spellTargets(const JsonNode & request) const
+    {
+        fields(request, {"version", "requestId", "op", "revision", "stack", "spell"});
+        if (integer(request["revision"], 0, INT64_MAX) != revision || game->currentBattles.empty()) throw std::runtime_error("Stale or ended battle");
+        const auto & battle = *game->currentBattles.front();
+        const auto * actor = battle.battleActiveUnit();
+        if (!actor || integer(request["stack"], 0, INT32_MAX) != actor->unitId()) throw std::runtime_error("Stack is not active");
+        const auto * hero = battle.battleGetOwnerHero(actor);
+        const auto * spell = SpellID(integer(request["spell"], 0, 69)).toSpell();
+        if (!hero || !spell->isCombat() || spell->isCreatureAbility() || !spell->canBeCast(&battle, spells::Mode::HERO, hero)) throw std::runtime_error("Spell unavailable");
+        spells::BattleCast cast(&battle, hero, spells::Mode::HERO, spell); auto mechanics = spell->battleMechanics(&cast);
+        const auto types = mechanics->getTargetTypes();
+        JsonNode result; result["targets"].Vector();
+        spells::Target prefix;
+        std::function<void(size_t)> enumerate = [&](size_t index)
+        {
+            if (index == types.size() || (types.size() == 1 && types[0] == spells::AimType::NOTHING))
+            {
+                if (!mechanics->canBeCastAt(prefix)) return;
+                JsonNode target; target.Vector();
+                for (const auto & destination : prefix)
+                {
+                    JsonNode entry;
+                    if (destination.unitValue) entry["unit"].Integer() = destination.unitValue->unitId();
+                    else entry["hex"].Integer() = destination.hexValue.toInt();
+                    target.Vector().push_back(std::move(entry));
+                }
+                result["targets"].Vector().push_back(std::move(target)); return;
+            }
+            if (types[index] == spells::AimType::CREATURE)
+                for (const auto * unit : battle.battleGetAllStacks(true)) { prefix.emplace_back(unit); enumerate(index + 1); prefix.pop_back(); }
+            else if (types[index] == spells::AimType::LOCATION || types[index] == spells::AimType::OBSTACLE)
+                for (int hex = 0; hex < 187; ++hex) { prefix.emplace_back(BattleHex(hex)); enumerate(index + 1); prefix.pop_back(); }
+        };
+        if (types.size() > 2) throw std::runtime_error("Unsupported target arity");
+        enumerate(0); return result;
+    }
+
     JsonNode act(const JsonNode & request)
     {
-        fields(request, {"version", "requestId", "op", "revision", "stack", "action", "hex", "target", "from"});
+        fields(request, {"version", "requestId", "op", "revision", "stack", "action", "hex", "target", "from", "spell", "targets"});
         if (integer(request["revision"], 0, INT64_MAX) != revision) throw std::runtime_error("Stale state revision");
         const auto current = state();
         if (game->currentBattles.empty() || !current["winner"].isNull()) throw std::runtime_error("Battle has ended");
@@ -266,9 +367,9 @@ public:
         BattleAction native;
         if (action == "ai")
         {
-            const auto side = actor->unitSide();
-            const auto player = battle.sideToPlayer(side);
-            auto callback = std::make_shared<CBattleCallback>(player, nullptr);
+            const auto player = battle.battleGetOwner(actor);
+            const auto side = battle.playerToSide(player);
+            auto callback = std::make_shared<AICallback>(player);
             callback->onBattleStarted(&battle);
             auto environment = std::make_shared<AIEnvironment>(*game, callback);
             int64_t ours = 0, theirs = 0;
@@ -279,6 +380,36 @@ public:
             const auto * stack = battle.battleGetStackByID(actor->unitId());
             if (!stack) throw std::runtime_error("Missing AI stack");
             native = evaluator.selectStackAction(stack);
+            if (evaluator.canCastSpell() && evaluator.attemptCastingSpell(stack))
+            {
+                if (!callback->spellAction) throw std::runtime_error("AI did not return its spell choice");
+                native = *callback->spellAction;
+            }
+        }
+        else if (action == "spell")
+        {
+            const auto * hero = battle.battleGetOwnerHero(actor);
+            const auto * spell = SpellID(integer(request["spell"], 0, 69)).toSpell();
+            if (!hero || !spell->isCombat() || spell->isCreatureAbility() || !spell->canBeCast(&battle, spells::Mode::HERO, hero)) throw std::runtime_error("Hero cannot cast this spell now");
+            spells::BattleCast cast(&battle, hero, spells::Mode::HERO, spell);
+            if (!request["targets"].isVector() || request["targets"].Vector().size() > 2) throw std::runtime_error("Spell targets required");
+            spells::Target targets;
+            for (const auto & target : request["targets"].Vector())
+            {
+                fields(target, {"unit", "hex"});
+                if (!target["unit"].isNull())
+                {
+                    const auto * unit = battle.battleGetStackByID(integer(target["unit"], 0, INT32_MAX), false);
+                    if (!unit || !target["hex"].isNull()) throw std::runtime_error("Invalid unit spell target");
+                    targets.emplace_back(unit);
+                }
+                else targets.emplace_back(BattleHex(integer(target["hex"], 0, 186)));
+            }
+            auto mechanics = spell->battleMechanics(&cast);
+            const auto types = mechanics->getTargetTypes();
+            const size_t targetCount = types.size() == 1 && types[0] == spells::AimType::NOTHING ? 0 : types.size();
+            if (targets.size() != targetCount || !mechanics->canBeCastAt(targets)) throw std::runtime_error("Illegal spell target");
+            native.actionType = EActionType::HERO_SPELL; native.side = battle.playerToSide(battle.battleGetOwner(actor)); native.stackNumber = -1; native.spell = spell->getId(); native.setTarget(targets);
         }
         else if (action == "wait" && current["legal"]["wait"].Bool()) native = BattleAction::makeWait(actor);
         else if (action == "defend") native = BattleAction::makeDefend(actor);
@@ -314,7 +445,7 @@ public:
         }
         else throw std::runtime_error("Unsupported or unavailable action");
         server.events.clear();
-        if (!handler->battles->makePlayerBattleAction(BattleID(0), battle.sideToPlayer(actor->unitSide()), native))
+        if (!handler->battles->makePlayerBattleAction(BattleID(0), battle.battleGetOwner(actor), native))
             throw std::runtime_error("Engine rejected a advertised legal action");
         ++revision;
         JsonNode response; response["state"] = state(); response["events"].Vector() = server.events;
@@ -362,6 +493,7 @@ int main()
                     session = std::move(candidate);
                     payload["state"] = session->state(); payload["events"].Vector() = session->server.events;
                 }
+                else if (op == "spellTargets") { if (!session) throw std::runtime_error("Create a battle first"); payload = session->spellTargets(request); }
                 else if (op == "act") { if (!session) throw std::runtime_error("Create a battle first"); payload = session->act(request); }
                 else if (op == "state") { fields(request, {"version", "requestId", "op"}); if (!session) throw std::runtime_error("No active battle"); payload["state"] = session->state(); }
                 else if (op == "dispose") { fields(request, {"version", "requestId", "op"}); session.reset(); }

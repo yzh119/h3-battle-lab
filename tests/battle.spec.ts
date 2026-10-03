@@ -4,7 +4,7 @@ async function missingArt(page: any) {
   await page.route('**/local-assets/**', (route: any) => route.fulfill({ status: 404, body: '' }));
 }
 async function open(page: any) {
-  await page.goto('/'); await expect(page.locator('#loading')).toBeHidden();
+  await page.goto('/'); await page.waitForFunction(() => !!(window as any).battleLab); await expect(page.locator('#loading')).toBeHidden({ timeout: 20000 });
   await expect.poll(async () => (await snapshot(page)).draws).toBeGreaterThan(0);
 }
 
@@ -43,7 +43,7 @@ test('army capacity, selection and custom format validation work without combat'
 test('local GLBs expose clips and change bone transforms', async ({ page, request }) => {
   const response = await request.get('/local-assets/manifest.json');
   test.skip(!response.headers()['content-type']?.includes('json'), 'Private art is absent');
-  await open(page); const initial = await snapshot(page);
+  await open(page); await expect.poll(async () => (await snapshot(page)).units.every((u: any) => u.imported), { timeout: 30000 }).toBe(true); const initial = await snapshot(page);
   expect(initial.units.every((u: any) => u.imported)).toBe(true);
   expect(initial.units[0].clips).toEqual(expect.arrayContaining(['idle', 'walk', 'attack', 'hit', 'death']));
   await page.getByRole('button', { name: '行走', exact: true }).click(); await page.waitForTimeout(220);
@@ -63,7 +63,7 @@ test('real VCMI browser connection plays two shots and applies native state at i
   const packet = page.waitForResponse(response => response.url().endsWith('/api/engine') && response.request().postDataJSON()?.request.op === 'act');
   await page.evaluate(() => { void (window as any).battleLab.attack(); });
   const authoritative = (await (await packet).json()).response.result;
-  await expect.poll(async () => (await snapshot(page)).projectiles).toBe(1);
+  await page.waitForFunction(() => (window as any).battleLab.snapshot().projectiles === 1);
   expect((await snapshot(page)).units[1].hp).toBe(300);
   await expect.poll(async () => (await snapshot(page)).busy, { timeout: 15000 }).toBe(false);
   const after = await snapshot(page); expect(after.state).toEqual(authoritative.state);
@@ -103,7 +103,7 @@ test('overview and close-up share canvas bounds and restore the selected backgro
   await missingArt(page);
   await page.route('**/local-assets/manifest.json', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ units: {}, backgrounds: [{ label: '画布测试', url: '/test-backdrop.svg' }] }) }));
   await page.route('**/test-backdrop.svg', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><rect width="1200" height="800" fill="#687850"/></svg>' }));
-  await open(page); expect((await snapshot(page)).backdrop).toBe(true);
+  await open(page); await expect.poll(async () => (await snapshot(page)).backdrop).toBe(true);
   const bounds = await page.locator('#battle').boundingBox();
   await page.locator('#closeup').click(); expect((await snapshot(page)).backdrop).toBe(false);
   expect(await page.locator('#battle').boundingBox()).toEqual(bounds);
@@ -175,9 +175,55 @@ test('local model with alternate skeleton scenes loads and animates', async ({ p
   const manifest = await response.json(); test.skip(!manifest.units.cavalier, 'Alternate skeleton export absent');
   await open(page); await expect(page.locator('#replace-unit')).toBeEnabled();
   await page.locator('#creature-picker').selectOption('cavalier'); await page.locator('#replace-unit').click();
-  await expect.poll(async () => (await snapshot(page)).units[0].kind).toBe('cavalier');
-  expect((await snapshot(page)).units[0].imported).toBe(true);
+  await expect.poll(async () => (await snapshot(page)).units[0].kind, { timeout: 20000 }).toBe('cavalier');
+  await expect.poll(async () => (await snapshot(page)).units[0].imported, { timeout: 60000 }).toBe(true);
   await page.getByRole('button', { name: '行走', exact: true }).click();
   await page.waitForTimeout(100); const pose = (await snapshot(page)).units[0].pose;
   await expect.poll(async () => (await snapshot(page)).units[0].pose).not.toBe(pose);
+});
+
+test('hero spellbook casts native damage and renders summoned units', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  await missingArt(page); const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
+  await open(page); await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#hero-editor summary').click(); await page.locator('#hero-enabled-0').check();
+  await page.locator('#hero-spells-0').selectOption(['15', '68']);
+  await expect(page.locator('#start-battle')).toBeEnabled(); await page.locator('#start-battle').click();
+  await expect(page.locator('#defend-turn')).toBeEnabled(); await page.locator('#spellbook summary').click();
+  await expect(page.locator('#hero-status')).toContainText('100/100');
+  await expect(page.locator('#cast-spell')).toBeEnabled();
+  const before = await snapshot(page), enemy = before.state.units.find((u: any) => u.side === 1);
+  await page.locator('#cast-spell').click(); await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+  const after = await snapshot(page);
+  expect(after.state.heroes[0].mana).toBe(95); expect(after.state.activeStack).toBe(before.state.activeStack);
+  expect(after.state.units.find((u: any) => u.id === enemy.id).health).toBe(enemy.health - 40);
+  await expect(page.locator('#cast-spell')).toBeDisabled(); await expect(page.locator('#combat-log')).toContainText('Magic Arrow');
+  await page.locator('#reset').click(); await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#hero-spells-0').selectOption('68'); await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#start-battle').click(); await expect(page.locator('#cast-spell')).toBeEnabled();
+  await page.locator('#cast-spell').click(); await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+  const summoned = (await snapshot(page)).units.find((u: any) => u.native?.creature === 'core:waterElemental');
+  expect(summoned).toBeTruthy(); expect(summoned.count).toBe(6); expect(summoned.imported).toBe(false);
+  expect((await snapshot(page)).draws).toBeGreaterThan(0); expect(errors).toEqual([]);
+  await page.screenshot({ path: '.local/hero-spellbook-native.png' });
+});
+
+
+test('a pending model request does not block battlefield controls', async ({ page }) => {
+  let release!: () => void; const pending = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/local-assets/manifest.json', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ units: { skeleton: { label: '骷髅兵', url: '/local-assets/delayed.glb' }, cavalier: { label: '骑兵', url: '/local-assets/delayed.glb' } } }) }));
+  await page.route('**/local-assets/delayed.glb', async route => { await pending; await route.fulfill({ status: 404, body: '' }); });
+  await page.route('**/api/engine', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: '引擎未配置' }) }));
+  try {
+    await open(page); await expect(page.locator('#apply-count')).toBeEnabled();
+    expect((await snapshot(page)).units[0].imported).toBe(false);
+    await page.locator('#stack-count').fill('37'); await page.locator('#apply-count').click();
+    expect((await snapshot(page)).units[0].count).toBe(37);
+    await page.locator('#creature-picker').selectOption('cavalier'); await page.locator('#replace-unit').click();
+    await expect.poll(async () => (await snapshot(page)).units[0].kind).toBe('cavalier');
+    await expect(page.locator('#apply-count')).toBeEnabled();
+    release(); await expect(page.locator('#toast')).toContainText('继续使用示意模型');
+    expect((await snapshot(page)).units[0].imported).toBe(false);
+    expect((await snapshot(page)).units[0].count).toBe(37);
+  } finally { release(); }
 });

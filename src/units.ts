@@ -84,7 +84,8 @@ export class UnitView {
     this.disposeDummy();
     this.root.remove(this.model); this.model = wrapper; this.root.add(wrapper); this.dummy = undefined;
     this.clips = gltf.animations; this.mixer = new THREE.AnimationMixer(model); this.action = undefined;
-    this.imported = true; this.current = ''; this.play('idle');
+    const current = this.current, once = this.remaining > 0 || current === 'death';
+    this.imported = true; this.current = ''; this.play(this.clips.some(clip => clip.name === current) ? current : 'idle', once);
   }
   private disposeDummy(): void {
     if (this.dummy) this.dummy.root.traverse(object => {

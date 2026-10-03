@@ -5,6 +5,8 @@
 #include "lib/GameLibrary.h"
 #include "lib/VCMIDirs.h"
 #include "lib/CSkillHandler.h"
+#include "lib/spells/CSpellHandler.h"
+#include "lib/spells/CSpell.h"
 #include "lib/CStack.h"
 #include "lib/StartInfo.h"
 #include "lib/battle/BattleInfo.h"
@@ -61,7 +63,9 @@ JsonNode snapshot(const CGameState & state)
         JsonNode unit;
         unit["id"].Integer() = stack->unitId();
         unit["creature"].String() = stack->unitType()->getJsonKey();
+        unit["label"].String() = stack->unitType()->getNameSingularTranslated();
         unit["side"].Integer() = static_cast<int>(stack->unitSide());
+        unit["controller"].Integer() = static_cast<int>(battle.playerToSide(battle.battleGetOwner(stack)));
         unit["slot"].Integer() = stack->unitSlot().getNum();
         unit["hex"].Integer() = stack->getPosition().toInt();
         unit["count"].Integer() = stack->getCount();
@@ -77,6 +81,34 @@ JsonNode snapshot(const CGameState & state)
         unit["flying"].Bool() = stack->hasBonusOfType(BonusType::FLYING);
         for (const auto & hex : stack->getHexes()) unit["footprint"].Vector().emplace_back(hex.toInt());
         units.push_back(std::move(unit));
+    }
+    for (const auto side : {BattleSide::ATTACKER, BattleSide::DEFENDER})
+    {
+        JsonNode heroState;
+        if (const auto * hero = battle.battleGetFightingHero(side))
+        {
+            heroState["side"].Integer() = static_cast<int>(side);
+            heroState["mana"].Integer() = hero->mana;
+            heroState["maxMana"].Integer() = hero->manaLimit();
+            heroState["attack"].Integer() = hero->getPrimSkillLevel(PrimarySkill::ATTACK);
+            heroState["defense"].Integer() = hero->getPrimSkillLevel(PrimarySkill::DEFENSE);
+            heroState["power"].Integer() = hero->getPrimSkillLevel(PrimarySkill::SPELL_POWER);
+            heroState["knowledge"].Integer() = hero->getPrimSkillLevel(PrimarySkill::KNOWLEDGE);
+            heroState["spells"].Vector();
+            for (const auto & spell : LIBRARY->spellh->objects)
+            {
+                if (spell->getId().getNum() >= 70 || !spell->isCombat() || spell->isCreatureAbility() || !hero->canCastThisSpell(spell.get())) continue;
+                JsonNode entry;
+                entry["id"].Integer() = spell->getId().getNum();
+                entry["label"].String() = spell->getNameTranslated();
+                entry["key"].String() = spell->getJsonKey();
+                entry["cost"].Integer() = battle.battleGetSpellCost(spell.get(), hero);
+                entry["level"].Integer() = spell->getLevel();
+                entry["castable"].Bool() = spell->canBeCast(&battle, spells::Mode::HERO, hero);
+                heroState["spells"].Vector().push_back(std::move(entry));
+            }
+        }
+        result["heroes"].Vector().push_back(std::move(heroState));
     }
     result["obstacles"].Vector();
     for (const auto & obstacle : battle.battleGetAllObstacles())
@@ -115,6 +147,24 @@ public:
                 victim["damage"].Integer() = hit.damageAmount;
                 victim["killed"].Integer() = hit.killedAmount;
                 victim["secondary"].Bool() = hit.isSecondary();
+                event["victims"].Vector().push_back(std::move(victim));
+            }
+        }
+        else if (auto * spell = dynamic_cast<BattleSpellCast *>(&pack))
+        {
+            event["type"].String() = "spell";
+            event["spell"].Integer() = spell->spellID.getNum();
+            event["label"].String() = spell->spellID.toSpell()->getNameTranslated();
+            event["side"].Integer() = static_cast<int>(spell->side);
+            for (const auto id : spell->affectedCres) event["affected"].Vector().emplace_back(id);
+        }
+        else if (auto * injuries = dynamic_cast<StacksInjured *>(&pack))
+        {
+            event["type"].String() = injuries->stacks.empty() ? "nativeUpdate" : "injury";
+            for (const auto & hit : injuries->stacks)
+            {
+                JsonNode victim; victim["id"].Integer() = hit.stackAttacked;
+                victim["damage"].Integer() = hit.damageAmount; victim["killed"].Integer() = hit.killedAmount;
                 event["victims"].Vector().push_back(std::move(victim));
             }
         }

@@ -163,6 +163,93 @@ class NativeBackendTests(unittest.TestCase):
             state = self.act(state, 'ai')['state']
         self.assertEqual(state.get('winner'), 0)
 
+    def hero(self, spells, skills=None):
+        return {'attack': 2, 'defense': 2, 'power': 3, 'knowledge': 10, 'skills': skills or [], 'spells': spells}
+
+    def hero_battle(self, spells, skills=None, armies=None):
+        armies = armies or [[{'creature': 3, 'count': 30}], [{'creature': 58, 'count': 100}]]
+        response = self.request('create', seed=1337, armies=armies, heroes=[self.hero(spells, skills), None])
+        self.assertTrue(response['ok'], response.get('error'))
+        return response['result']['state']
+
+    def spell_targets(self, state, spell):
+        response = self.request('spellTargets', revision=state['revision'], stack=state['activeStack'], spell=spell)
+        self.assertTrue(response['ok'], response.get('error'))
+        return response['result']['targets']
+
+    def test_hero_spell_damage_mana_cooldown_and_rejection_are_native(self):
+        state = self.hero_battle([15])
+        marksman = next(u for u in state['units'] if u['side'] == 0)
+        self.assertEqual((marksman['attack'], marksman['defense']), (8, 5))
+        target = next(u for u in state['units'] if u['side'] == 1)
+        result = self.act(state, 'spell', spell=15, targets=self.spell_targets(state, 15)[0])
+        after = result['state']
+        self.assertEqual(after['heroes'][0]['mana'], 95)
+        self.assertEqual(after['activeStack'], state['activeStack'])
+        self.assertEqual(next(u for u in after['units'] if u['id'] == target['id'])['health'], target['health'] - 40)
+        self.assertTrue(any(e['type'] == 'spell' for e in result['events']))
+        self.assertFalse(self.request('act', revision=after['revision'], stack=after['activeStack'], action='spell', spell=15, targets=[{'unit': target['id']}])['ok'])
+        self.assertEqual(self.request('state')['result']['state'], after)
+        self.act(after, 'defend')
+        self.assertFalse(self.request('create', seed=1337, armies=[[{'creature': 3, 'count': 1}], [{'creature': 58, 'count': 1}]], heroes=[self.hero([0]), None])['ok'])
+
+    def test_native_mass_haste_teleport_clone_and_summoning(self):
+        armies = [[{'creature': 3, 'count': 30}, {'creature': 0, 'count': 30}], [{'creature': 58, 'count': 100}]]
+        state = self.hero_battle([53], [{'id': 15, 'level': 3}], armies)
+        result = self.act(state, 'spell', spell=53, targets=self.spell_targets(state, 53)[0])['state']
+        for original in state['units']:
+            if original['side'] == 0:
+                self.assertEqual(next(u for u in result['units'] if u['id'] == original['id'])['speed'], original['speed'] + 5)
+        state = self.hero_battle([63], armies=armies)
+        targets = self.spell_targets(state, 63)
+        self.assertTrue(all(len(target) == 2 for target in targets))
+        target = targets[0]
+        teleported = self.act(state, 'spell', spell=63, targets=target)['state']
+        self.assertEqual(next(u for u in teleported['units'] if u['id'] == target[0]['unit'])['hex'], target[1]['hex'])
+        for spell, creature in [(65, 'core:marksman'), (68, 'core:waterElemental')]:
+            state = self.hero_battle([spell], armies=armies)
+            result = self.act(state, 'spell', spell=spell, targets=self.spell_targets(state, spell)[0])['state']
+            created = [u for u in result['units'] if u['id'] not in {u['id'] for u in state['units']}]
+            self.assertEqual(len(created), 1)
+            self.assertEqual(created[0]['creature'], creature)
+            self.assertGreater(created[0]['count'], 0)
+            self.assertTrue(created[0]['footprint'])
+
+    def test_native_ai_can_cast_before_its_unit_acts(self):
+        state = self.hero_battle([15])
+        result = self.act(state, 'ai')
+        self.assertTrue(any(e['type'] == 'spell' for e in result['events']))
+        self.assertEqual(result['state']['heroes'][0]['mana'], 95)
+        self.assertEqual(result['state']['activeStack'], state['activeStack'])
+        following = self.act(result['state'], 'ai')
+        self.assertEqual(following['state']['heroes'][0]['mana'], 95)
+        self.assertFalse(any(e['type'] == 'spell' for e in following['events']))
+
+    def test_hypnotized_stack_uses_engine_controller(self):
+        state = self.hero_battle([60], armies=[[{'creature': 3, 'count': 30}], [{'creature': 0, 'count': 1}]])
+        targets = self.spell_targets(state, 60)
+        state = self.act(state, 'spell', spell=60, targets=targets[0])['state']
+        hypnotized = next(u for u in state['units'] if u['side'] == 1)
+        self.assertEqual(hypnotized['controller'], 0)
+        state = self.act(state, 'defend')['state']
+        self.assertEqual(state['activeStack'], hypnotized['id'])
+        self.act(state, 'defend')
+
+    def test_resurrection_and_animate_dead_restore_native_corpses(self):
+        for spell, guardian, victim in [(38, 13, 0), (39, 65, 56)]:
+            armies = [[{'creature': guardian, 'count': 1}, {'creature': victim, 'count': 2}], [{'creature': 3, 'count': 100}]]
+            state = self.hero_battle([spell], [{'id': 17, 'level': 3}], armies)
+            corpse = next(u for u in state['units'] if u['side'] == 0 and u['slot'] == 1)
+            state = self.act(state, 'defend')['state']
+            self.assertEqual(next(u for u in state['units'] if u['id'] == state['activeStack'])['side'], 1)
+            state = self.act(state, 'shoot', target=corpse['id'])['state']
+            self.assertEqual(next(u for u in state['units'] if u['id'] == corpse['id'])['count'], 0)
+            target = next(target for target in self.spell_targets(state, spell) if target[0].get('unit') == corpse['id'])
+            state = self.act(state, 'spell', spell=spell, targets=target)['state']
+            restored = next(u for u in state['units'] if u['id'] == corpse['id'])
+            self.assertEqual(restored['count'], 2)
+            self.assertEqual(restored['health'], restored['maxHealth'] * 2)
+
 
 if __name__ == "__main__":
     unittest.main()
