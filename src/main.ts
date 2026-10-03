@@ -410,13 +410,13 @@ function showAttributes(view: UnitView, x: number, y: number) {
 }
 canvas.onpointerleave = () => { hideAttributes(); world.hover.visible = false; world.showPath(null); };
 canvas.onpointermove = event => { if (event.buttons) { hideAttributes(); return; } point(event);
-  const unitHit = raycaster.intersectObjects(views.filter(v => v.unit.hp > 0).map(v => v.proxy))[0];
+  const unitHit = raycaster.intersectObjects(views.filter(v => v.unit.hp > 0 || v.allowDeadTarget).map(v => v.proxy))[0];
   const hovered = unitHit && views.find(v => v.unit.id === unitHit.object.userData.unitId);
   if (hovered) showAttributes(hovered, event.clientX, event.clientY); else hideAttributes();
   if (busy) return; const hit = raycaster.intersectObjects(world.pickable)[0]; world.hover.visible = !!hit; if (!hit) { world.showPath(null); return; } const cell = hit.object.userData.cell as Hex; world.hover.position.copy(worldPosition(cell)); world.hover.position.y = .035; const path = state?.legal?.moves.find(move => move.hex === toHexId(cell))?.path; world.showPath(path?.map(fromHexId) ?? null); };
 canvas.onpointerdown = event => { hideAttributes(); pressed.set(event.clientX, event.clientY); };
 canvas.onpointerup = event => { if (event.button !== 0 || busy || pressed.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 5) return; point(event);
-  const unit = raycaster.intersectObjects(views.map(v => v.proxy))[0]; if (unit) { const view = views.find(v => v.unit.id === unit.object.userData.unitId)!; if (chooseSpellTarget(nativeUnits.get(view.unit.id))) return; if (state && controller(nativeUnits.get(view.unit.id)) !== controller(nativeUnits.get(viewFor(state.activeStack!)?.unit.id ?? ''))) void attack(view); else selectView(view); return; }
+  const unit = raycaster.intersectObjects(views.filter(v => v.unit.hp > 0 || v.allowDeadTarget).map(v => v.proxy))[0]; if (unit) { const view = views.find(v => v.unit.id === unit.object.userData.unitId)!; if (chooseSpellTarget(nativeUnits.get(view.unit.id))) return; if (state && controller(nativeUnits.get(view.unit.id)) !== controller(nativeUnits.get(viewFor(state.activeStack!)?.unit.id ?? ''))) void attack(view); else selectView(view); return; }
   const tile = raycaster.intersectObjects(world.pickable)[0]; if (tile && !chooseSpellTarget(undefined, toHexId(tile.object.userData.cell))) void move(tile.object.userData.cell);
 };
 $('#overview').onclick = () => { world.resetCamera(); $('#overview').classList.add('active'); $('#closeup').classList.remove('active'); }; $('#closeup').onclick = () => { world.frameUnit(selected.root.position); $('#closeup').classList.add('active'); $('#overview').classList.remove('active'); };
@@ -456,5 +456,9 @@ async function boot() {
 }
 world.renderer.setAnimationLoop(() => { clock.update(); const dt = Math.min(clock.getDelta(), .05); views.forEach(v => v.update(dt, v === selected)); if (world.controls.enabled) world.controls.update(); world.renderer.render(world.scene, world.camera);
   const rect = canvas.getBoundingClientRect(); for (const view of views) { const badge = badges.get(view.unit.id); if (!badge) continue; const point = view.root.position.clone().add(new THREE.Vector3(0, .15, 0)).project(world.camera); badge.hidden = view.unit.hp <= 0 || Math.abs(point.z) > 1; badge.textContent = String(count(view)); badge.style.left = `${rect.left + (point.x + 1) * rect.width / 2}px`; badge.style.top = `${rect.top + (1 - point.y) * rect.height / 2}px`; } });
-Object.assign(window, { battleLab: { snapshot: () => ({ connected, busy, deploying, projectiles, state, backdrop: world.isBackdrop(), canvas: canvas.getBoundingClientRect().toJSON(), grid: world.grid.visible, draws: world.renderer.info.render.calls, units: views.map(v => ({ ...v.unit, count: count(v), native: nativeUnits.get(v.unit.id), imported: v.imported, animation: v.current, clips: v.clips.map(c => c.name), pose: v.poseSignature() })) }), move, attack: (targetId?: number) => { const target = targetId !== undefined ? viewFor(targetId) : views.find(v => controller(nativeUnits.get(v.unit.id)) !== controller(nativeUnits.get(viewFor(state?.activeStack ?? -1)?.unit.id ?? ''))); return target ? attack(target) : Promise.resolve(); } } });
+function unitScreenPosition(view: UnitView) {
+  const rect = canvas.getBoundingClientRect(), point = view.root.position.clone().add(new THREE.Vector3(0, 1.3, 0)).project(world.camera);
+  return { x: rect.left + (point.x + 1) * rect.width / 2, y: rect.top + (1 - point.y) * rect.height / 2 };
+}
+Object.assign(window, { battleLab: { snapshot: () => ({ connected, busy, deploying, projectiles, state, backdrop: world.isBackdrop(), canvas: canvas.getBoundingClientRect().toJSON(), grid: world.grid.visible, draws: world.renderer.info.render.calls, units: views.map(v => ({ ...v.unit, screen: unitScreenPosition(v), count: count(v), native: nativeUnits.get(v.unit.id), imported: v.imported, animation: v.current, clips: v.clips.map(c => c.name), pose: v.poseSignature() })) }), move, attack: (targetId?: number) => { const target = targetId !== undefined ? viewFor(targetId) : views.find(v => controller(nativeUnits.get(v.unit.id)) !== controller(nativeUnits.get(viewFor(state?.activeStack ?? -1)?.unit.id ?? ''))); return target ? attack(target) : Promise.resolve(); } } });
 void boot();

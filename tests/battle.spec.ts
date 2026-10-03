@@ -280,7 +280,11 @@ test('archangel active ability restores a dead army stack through the native eng
   await expect(page.locator('#hero-status')).toContainText('1 次');
   await expect(page.locator('#cast-spell')).toBeEnabled();
   const option = page.locator('#spell-target option').filter({ hasText: 'Pikeman' });
-  await expect(option).toHaveCount(1); await page.locator('#spell-target').selectOption((await option.getAttribute('value'))!);
+  await expect(option).toHaveCount(1);
+  const corpse = (await snapshot(page)).units.find((u: any) => u.kind === 'pikeman');
+  await page.mouse.click(corpse.screen.x, corpse.screen.y);
+  await expect(page.locator('#toast')).toContainText('已选择施法目标');
+  await expect(page.locator('#spell-target')).toHaveValue((await option.getAttribute('value'))!);
   await page.locator('#cast-spell').click(); await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
   const after = await snapshot(page);
   expect(after.state.units.find((u: any) => u.id === pikeman.id).count).toBe(10);
