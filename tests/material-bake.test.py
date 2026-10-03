@@ -34,6 +34,23 @@ class SurfaceTests(unittest.TestCase):
         mat, _ = material('TEX_IMAGE', 'VALTORGB')
         self.assertFalse(bake.procedural(mat))
 
+    def emission_material(self, color, strength):
+        mat, shader = material(None, None)
+        for name, source in [('Emission Color', color), ('Emission Strength', strength)]:
+            links = [NS(from_node=NS(type=source))] if source else []
+            shader.inputs[name] = NS(is_linked=bool(links), links=links)
+        return mat
+
+    def test_image_emission_with_face_strength_mask_requires_baking(self):
+        # Exporting only the image loses the mask and makes clothing glow.
+        self.assertTrue(bake.emission_procedural(self.emission_material('TEX_IMAGE', 'MATH')))
+
+    def test_direct_image_emission_with_uniform_strength_is_preserved(self):
+        self.assertFalse(bake.emission_procedural(self.emission_material('TEX_IMAGE', None)))
+
+    def test_procedural_emission_colour_requires_baking(self):
+        self.assertTrue(bake.emission_procedural(self.emission_material('VALTORGB', None)))
+
 
 if __name__ == '__main__':
     unittest.main()

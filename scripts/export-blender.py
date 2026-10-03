@@ -299,6 +299,8 @@ def main():
                         obj.select_set(True)
                 path = Path(temporary) / (action + '.glb')
                 bpy.ops.export_scene.gltf(filepath=str(path), export_format='GLB', use_selection=True,
+                                          export_all_vertex_colors=False,
+                                          export_active_vertex_color_when_no_material=False,
                                           export_animations=True, export_animation_mode='SCENE',
                                           export_anim_scene_split_object=False, export_force_sampling=True,
                                           export_frame_range=True, export_anim_slide_to_zero=True,
@@ -308,6 +310,8 @@ def main():
         manifest['units'][identifier] = {'label': entry.get('label', labels.get(identifier, identifier)),
                                         'url': f'/local-assets/{identifier}.glb?v={hashlib.sha256((opts.out / (identifier + ".glb")).read_bytes()).hexdigest()[:16]}', 'height': entry.get('height', 2.35), 'clips': clips,
                                         'faction': entry.get('faction', '墓园'), 'draft': entry.get('draft', False)}
+        if entry.get('revision'):
+            manifest['units'][identifier]['revision'] = str(entry['revision'])
         print('EXPORTED', identifier, clips, flush=True)
     (opts.out / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
 

@@ -5,7 +5,7 @@ import { type VisualUnit as Unit } from './presentation.ts';
 import { fromHexId } from './presentation.ts';
 import { worldPosition, type EnvironmentAsset } from './world.ts';
 
-export interface Asset { label: string; url: string; height?: number; faction?: string; draft?: boolean; forward?: '+z' | '-z' | '+x' | '-x' }
+export interface Asset { label: string; url: string; height?: number; faction?: string; draft?: boolean; revision?: string; forward?: '+z' | '-z' | '+x' | '-x' }
 export interface Manifest { environments?: Record<string, EnvironmentAsset>; backgrounds?: { label: string; url: string }[]; units: Record<string, Asset> }
 const loader = new GLTFLoader();
 const cache = new Map<string, Promise<GLTF>>();
@@ -54,6 +54,7 @@ const displayHeight: Record<string, number> = {
   'bone-dragon': 3.9, 'ghost-dragon': 4.05,
 };
 export class UnitView {
+  sourceRevision?: string;
   readonly root = new THREE.Group();
   private readonly body = new THREE.Group();
   private readonly bases = new THREE.Group();
@@ -141,7 +142,7 @@ export class UnitView {
     this.body.remove(this.model); this.model = wrapper; this.body.add(wrapper); this.dummy = undefined;
     this.clips = gltf.animations; this.mixer = new THREE.AnimationMixer(model); this.action = undefined;
     const current = this.current, once = this.remaining > 0 || current === 'death';
-    this.imported = true; this.current = ''; this.play(this.clips.some(clip => clip.name === current) ? current : 'idle', once);
+    this.imported = true; this.sourceRevision = asset.revision; this.current = ''; this.play(this.clips.some(clip => clip.name === current) ? current : 'idle', once);
   }
   setFootprint(hexes: number[]): void {
     this.footprint = [...hexes]; this.bases.clear();
