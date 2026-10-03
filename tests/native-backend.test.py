@@ -103,6 +103,20 @@ class NativeBackendTests(unittest.TestCase):
         self.assertFalse(self.request("create", seed=1, armies=[[{"creature": 10, "count": 1, "hex": 86}], [{"creature": 58, "count": 1, "hex": 96}]])["ok"])
         self.assertEqual(self.request("state")["result"]["state"], state)
 
+    def test_complete_town_ten_week_preset_includes_growth_buildings(self):
+        preset = self.request("catalogue")["result"]["tenWeekTownArmies"]
+        self.assertEqual(preset["weeks"], 10)
+        self.assertEqual(preset["profile"], "complete-town-no-grail")
+        self.assertEqual([s["count"] for s in preset["armies"][0]], [280, 180, 170, 80, 60, 40, 20])
+        self.assertEqual([s["count"] for s in preset["armies"][1]], [300, 160, 140, 80, 60, 40, 20])
+        self.assertEqual([s["upgraded"] for s in preset["armies"][0]], list(range(1, 14, 2)))
+        self.assertEqual([s["upgraded"] for s in preset["armies"][1]], list(range(57, 70, 2)))
+        armies = [[{"creature": s["upgraded"], "count": s["count"], "slot": s["slot"]} for s in army] for army in preset["armies"]]
+        state = self.create(*armies)
+        self.assertEqual(len(state["units"]), 14)
+        for unit in state["units"]:
+            self.assertEqual(unit["count"], armies[unit["side"]][unit["slot"]]["count"])
+
     def test_sparse_slots_remain_stable_and_duplicate_slots_are_rejected(self):
         state = self.create([{"creature": 3, "count": 73, "slot": 6, "hex": 90}, {"creature": 0, "count": 12, "slot": 2}], [{"creature": 58, "count": 20, "slot": 4, "hex": 96}])
         self.assertEqual(sorted((u["side"], u["slot"]) for u in state["units"]), [(0, 2), (0, 6), (1, 4)])

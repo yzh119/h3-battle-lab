@@ -2,6 +2,7 @@
 // Local JSON-lines engine service; GUI and transports do not compute combat.
 #include "battle-context.h"
 #include "lib/json/JsonParser.h"
+#include "lib/mapObjects/CGTownInstance.h"
 #include "lib/battle/ReachabilityInfo.h"
 #include "server/queries/BattleQueries.h"
 #include "server/queries/QueriesProcessor.h"
@@ -21,6 +22,45 @@ int64_t integer(const JsonNode & value, int64_t low, int64_t high)
 }
 bool allowedCreature(int id) { return (id >= 0 && id <= 13) || (id >= 56 && id <= 69); }
 
+JsonNode tenWeekTownArmies()
+{
+    // A real callback context, isolated from the current battle. Growth itself
+    // comes from CGTownInstance::getGrowthInfo, including castle and horde buildings.
+    TinyH3M::TinyH3MBuilder builder(EMapFormat::SOD);
+    builder.size(36).name("BattleLabGrowth").playerActive(PlayerColor(0)).playerActive(PlayerColor(1))
+        .hero({5, 5, 0}, HeroTypeID(0), PlayerColor(0)).heroGarrison({{CreatureID(0), 1}})
+        .hero({7, 7, 0}, HeroTypeID(1), PlayerColor(1)).heroGarrison({{CreatureID(0), 1}});
+    MemoryMap maps(builder.build());
+    auto game = std::make_shared<CGameState>(); game->preInit(LIBRARY);
+    StartInfo start; start.mapname = "BattleLabGrowth"; start.mode = EStartMode::NEW_GAME;
+    for (int side = 0; side < 2; ++side) {
+        auto & player = start.playerInfos[PlayerColor(side)]; player.color = PlayerColor(side); player.name = "Growth";
+        player.connectedPlayerIDs.insert(static_cast<PlayerConnectionID>(side)); player.bonus = PlayerStartingBonus::GOLD;
+    }
+    GameRandomizer randomizer(*game); randomizer.setSeed(0);
+    Load::ProgressAccumulator progress; game->init(&maps, &start, randomizer, progress, false);
+    JsonNode result; result["weeks"].Integer() = 10;
+    result["profile"].String() = "complete-town-no-grail";
+    for (const int faction : {0, 4}) {
+        CGTownInstance town(game.get()); town.ID = Obj::TOWN; town.subID = faction; town.tempOwner = PlayerColor::NEUTRAL;
+        for (const auto & [id, building] : town.getTown()->buildings)
+            if (id != BuildingID::GRAIL) town.addBuilding(id);
+        town.creatures.resize(town.getTown()->creatures.size());
+        JsonNode army;
+        for (size_t level = 0; level < town.creatures.size(); ++level) {
+            const auto & ids = town.getTown()->creatures[level];
+            town.creatures[level].second = ids;
+            const int weekly = town.getGrowthInfo(level).totalGrowth();
+            JsonNode entry; entry["slot"].Integer() = level;
+            entry["base"].Integer() = ids.front().getNum(); entry["upgraded"].Integer() = ids.back().getNum();
+            entry["weekly"].Integer() = weekly; entry["count"].Integer() = weekly * 10;
+            army.Vector().push_back(std::move(entry));
+        }
+        result["armies"].Vector().push_back(std::move(army));
+    }
+    return result;
+}
+
 JsonNode catalogue()
 {
     JsonNode result;
@@ -28,6 +68,7 @@ JsonNode catalogue()
     result["rulesProfile"].String() = "base-reference";
     result["customPacks"].Bool() = false;
     result["heroSpells"].Bool() = false;
+    result["tenWeekTownArmies"] = tenWeekTownArmies();
     for (int id = 0; id < 70; ++id)
     {
         if (!allowedCreature(id)) continue;

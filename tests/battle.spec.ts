@@ -116,3 +116,22 @@ test('overview and close-up share canvas bounds and restore the selected backgro
   await page.locator('#closeup').click(); expect(await page.locator('#battle').boundingBox()).toEqual(resized);
   await page.locator('#overview').click(); expect(await page.locator('#battle').boundingBox()).toEqual(resized);
 });
+
+test('native ten-week complete-town button fills both seven-slot armies and supports upgrades', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  await missingArt(page); await open(page); await expect(page.locator('#ten-week-armies')).toBeEnabled();
+  await page.locator('#preset-upgraded').uncheck(); await page.locator('#ten-week-armies').click();
+  await expect(page.locator('#ten-week-armies')).toBeEnabled();
+  const base = (await snapshot(page)).units;
+  expect(base).toHaveLength(14);
+  expect(base.filter((u: any) => u.team === 0).map((u: any) => u.count)).toEqual([280, 180, 170, 80, 60, 40, 20]);
+  expect(base.filter((u: any) => u.team === 1).map((u: any) => u.count)).toEqual([300, 160, 140, 80, 60, 40, 20]);
+  expect(base[0].kind).toBe('pikeman'); expect(base[6].kind).toBe('angel');
+  await page.locator('#preset-upgraded').check(); await page.locator('#ten-week-armies').click(); await expect(page.locator('#ten-week-armies')).toBeEnabled();
+  const upgraded = (await snapshot(page)).units;
+  expect(upgraded[0].kind).toBe('halberdier'); expect(upgraded[6].kind).toBe('archangel'); expect(upgraded[13].kind).toBe('ghost-dragon');
+  await page.locator('#start-battle').click(); await expect(page.locator('#defend-turn')).toBeEnabled();
+  expect((await snapshot(page)).state.units).toHaveLength(14); await expect(page.locator('#ten-week-armies')).toBeDisabled();
+  await page.locator('#reset').click(); await expect(page.locator('#ten-week-armies')).toBeEnabled();
+  expect((await snapshot(page)).units.map((u: any) => u.count)).toEqual(upgraded.map((u: any) => u.count));
+});

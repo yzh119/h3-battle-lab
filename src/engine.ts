@@ -18,6 +18,7 @@ export interface EngineEvent {
 export interface NativeCreature { id: number; key: string; label: string; health: number; speed: number; doubleWide: boolean }
 export interface EngineResult { state: EngineState; events: EngineEvent[] }
 export interface ArmyStack { creature: number; count: number; slot?: number; hex?: number }
+export interface TownArmyPreset { weeks: number; profile: string; armies: { slot: number; base: number; upgraded: number; weekly: number; count: number }[][] }
 export class EngineClient {
   private session?: string;
   async request<T>(op: string, data: Record<string, unknown> = {}): Promise<T> {
@@ -30,7 +31,7 @@ export class EngineClient {
     this.session = envelope.session;
     return envelope.response.result as T;
   }
-  connect() { this.session = undefined; return this.request<{ backend: string; creatures: NativeCreature[]; rulesProfile: string; customPacks: boolean; heroSpells: boolean }>('catalogue'); }
+  connect() { this.session = undefined; return this.request<{ backend: string; tenWeekTownArmies: TownArmyPreset; creatures: NativeCreature[]; rulesProfile: string; customPacks: boolean; heroSpells: boolean }>('catalogue'); }
   create(seed: number, armies: ArmyStack[][]) { return this.request<EngineResult>('create', { seed, armies }); }
   act(state: EngineState, action: string, options: Record<string, number> = {}) {
     return this.request<EngineResult>('act', { revision: state.revision, stack: state.activeStack, action, ...options });
