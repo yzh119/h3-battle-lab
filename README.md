@@ -186,3 +186,7 @@ A private environment entry in `manifest.json` has the following structure. Grou
 ```
 
 The local first grass scene uses Poly Haven pine/rock assets and scanned ground maps after a rejected Meshy scenery attempt. Asset provenance and exports remain local. This first scene is a draft; it does not establish that all 14 original background themes have been reconstructed or that their appearance has been accepted. GLB exports include a content hash in their URL, and manifest requests bypass the browser cache so updated local art can replace older exports on reload.
+
+Click a creature on either side, or its army slot, to inspect its native movement range. Blue/red tiles show the selected side; the engine includes current speed effects, obstacles and both cells of wide creatures. Selecting an enemy does not attack: use **攻击选中目标** to execute the active stack’s legal ranged/melee attack. Ground movement applies only when the active stack is selected. Deployment preview also supplies native ranges; an unconfigured engine provides no simulated range.
+
+Clicking the battlefield transfers keyboard focus from closed form controls, restoring WASD movement. Actual text/select editing still suppresses movement keys. Stack counts are depth-tested Three.js sprites near each base, with a restrained screen size; they no longer float over the GUI or nearer geometry. Grid outlines use a brighter line with a subtle dark border to remain visible on pale terrain.

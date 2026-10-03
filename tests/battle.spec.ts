@@ -54,6 +54,95 @@ test('WASD moves the camera relative to its heading and ignores text input', asy
   await page.keyboard.up('d');
 });
 
+test('clicking the battlefield after a select restores D movement and keeps labels out of the UI layer', async ({ page }) => {
+  await missingArt(page); await open(page);
+  await expect(page.locator('#connect-engine')).toBeEnabled();
+  await page.waitForFunction(() => !(window as any).battleLab.snapshot().deploying);
+  await page.locator('#closeup').click();
+  await page.locator('#unit-picker').focus();
+  await expect(page.locator('#unit-picker')).toBeFocused();
+  const unit = (await snapshot(page)).units[0];
+  await page.mouse.click(unit.screen.x, unit.screen.y);
+  await expect(page.locator('#battle')).toBeFocused();
+  const before = await snapshot(page);
+  const forward = before.camera.target.map((v: number, i: number) => v - before.camera.position[i]);
+  await page.keyboard.down('d');
+  await expect.poll(async () => (await snapshot(page)).camera.target).not.toEqual(before.camera.target);
+  await page.keyboard.up('d');
+  const after = await snapshot(page), delta = after.camera.target.map((v: number, i: number) => v - before.camera.target[i]);
+  expect(delta[0] * -forward[2] + delta[2] * forward[0]).toBeGreaterThan(0);
+  expect(after.units.map((u: any) => u.position)).toEqual(before.units.map((u: any) => u.position));
+  const labels = await page.locator('#stack-labels').boundingBox();
+  expect(labels!.width).toBe(1); expect(labels!.height).toBe(1);
+  expect(after.units.every((u: any) => u.countLabel.depthTest && u.countLabel.visible)).toBe(true);
+});
+
+test('clicking either army shows its native movement range without attacking', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  await missingArt(page); const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
+  await open(page); await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#creature-picker').selectOption('marksman'); await page.locator('#replace-unit').click();
+  await expect(page.locator('#start-battle')).toBeEnabled();
+  const redSlot = page.locator('.army-slot[data-team="1"][data-slot="0"]');
+  const blueSlot = page.locator('.army-slot[data-team="0"][data-slot="0"]');
+  await redSlot.click(); await page.locator('#closeup').click(); await blueSlot.click();
+  const preview = await snapshot(page), red = preview.units.find((u: any) => u.team === 1);
+  await page.mouse.click(red.screen.x, red.screen.y);
+  let current = await snapshot(page);
+  expect(current.selected).toBe(red.id);
+  expect(current.movementRange).toEqual(current.deployment.units.find((u: any) => u.side === 1).movement);
+  expect(current.movementRange.length).toBeGreaterThan(1);
+  await page.locator('#start-battle').click(); await expect(page.locator('#defend-turn')).toBeEnabled();
+  const initial = await snapshot(page), actor = initial.units.find((u: any) => u.native.id === initial.state.activeStack);
+  await redSlot.click(); await page.locator('#closeup').click(); await blueSlot.click();
+  const enemy = (await snapshot(page)).units.find((u: any) => u.team === 1);
+  await page.mouse.click(enemy.screen.x, enemy.screen.y);
+  current = await snapshot(page);
+  expect(current.selected).toBe(enemy.id); expect(current.state.revision).toBe(initial.state.revision);
+  expect(current.movementRange).toEqual(current.state.units.find((u: any) => u.side === 1).movement);
+  await page.screenshot({ path: '.local/selected-enemy-movement-range.png' });
+  await expect(page.locator('#attack-selected')).toBeEnabled();
+  await page.locator('#attack-selected').click(); await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+  current = await snapshot(page);
+  expect(current.state.revision).toBe(initial.state.revision + 1);
+  expect(current.state.units.find((u: any) => u.side === 1).health).toBeLessThan(enemy.native.health);
+  await blueSlot.click();
+  current = await snapshot(page);
+  expect(current.selected).toBe(actor.id);
+  expect(current.movementRange).toEqual(current.state.units.find((u: any) => u.id === actor.native.id).movement);
+  expect(errors).toEqual([]);
+});
+
+test('nearer geometry actually occludes the 3D count label', async ({ page }) => {
+  await missingArt(page); await open(page);
+  const pixels = await page.evaluate(async () => {
+    const THREE = await import(/* @vite-ignore */ '/node_modules/.vite/deps/three.js');
+    const { UnitView } = await import(/* @vite-ignore */ '/src/units.ts');
+    const { fromHexId } = await import(/* @vite-ignore */ '/src/presentation.ts');
+    const renderer = new THREE.WebGLRenderer({ antialias: false }); renderer.setSize(512, 512);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(42, 1, .1, 100);
+    camera.position.set(4, 5, 7); camera.lookAt(0, 1, 0); camera.updateMatrixWorld();
+    const target = new THREE.WebGLRenderTarget(512, 512);
+    const unit = new UnitView({ id: 'test', kind: 'skeleton', label: 'test', team: 0, armySlot: 0, cell: fromHexId(93), initialCount: 20, hp: 100 });
+    unit.root.position.set(0, 0, 0); scene.add(unit.root); unit.updateCountLabel(20, camera, 512); scene.updateMatrixWorld(true);
+    const anchor = unit.countLabel.getWorldPosition(new THREE.Vector3()); anchor.y += unit.countLabel.scale.y / 2;
+    const screen = anchor.clone().project(camera), x = Math.round((screen.x + 1) * 256), y = Math.round((screen.y + 1) * 256);
+    const read = () => { renderer.setRenderTarget(target); renderer.render(scene, camera); const pixel = new Uint8Array(4); renderer.readRenderTargetPixels(target, x, y, 1, 1, pixel); return [...pixel]; };
+    const visible = read();
+    const blocker = new THREE.Mesh(new THREE.PlaneGeometry(.8, .6), new THREE.MeshBasicMaterial({ color: 0xff0000 }));
+    blocker.position.copy(anchor).addScaledVector(camera.position.clone().sub(anchor).normalize(), .4); blocker.lookAt(camera.position); scene.add(blocker);
+    const occluded = read();
+    // Negative control: the old overlay behaviour would cover the red geometry.
+    unit.countLabel.material.depthTest = false; const overlay = read();
+    unit.dispose(); blocker.geometry.dispose(); blocker.material.dispose(); target.dispose(); renderer.dispose();
+    return { visible, occluded, overlay };
+  });
+  expect(pixels.visible[1]).toBeGreaterThan(30);
+  expect(pixels.occluded).toEqual([255, 0, 0, 255]);
+  expect(pixels.overlay[1]).toBeGreaterThan(30);
+});
+
 test('army capacity, selection and custom format validation work without combat', async ({ page }) => {
   test.setTimeout(process.env.CI ? 180000 : 90000);
   await page.setViewportSize({ width: 800, height: 600 });

@@ -63,6 +63,9 @@ export class UnitView {
   readonly height: number;
   readonly proxy: THREE.Mesh;
   readonly ring: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
+  readonly countLabel: THREE.Sprite;
+  private readonly countCanvas = document.createElement('canvas');
+  private labelCount = -1;
   model: THREE.Object3D;
   mixer?: THREE.AnimationMixer;
   clips: THREE.AnimationClip[] = [];
@@ -94,6 +97,33 @@ export class UnitView {
     this.proxy = new THREE.Mesh(new THREE.CylinderGeometry(.6, .6, 2.6, 8), new THREE.MeshBasicMaterial({ visible: false }));
     this.model.scale.setScalar(this.height / 2.35);
     this.proxy.scale.y = this.height / 2.6; this.proxy.position.y = this.height / 2; this.proxy.userData.unitId = unit.id; this.body.add(this.proxy);
+    this.countCanvas.width = 160; this.countCanvas.height = 64;
+    const texture = new THREE.CanvasTexture(this.countCanvas); texture.colorSpace = THREE.SRGBColorSpace;
+    this.countLabel = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: true, depthWrite: false, toneMapped: false }));
+    this.countLabel.center.set(.5, 0); this.root.add(this.countLabel);
+  }
+  updateCountLabel(count: number, camera: THREE.PerspectiveCamera, viewportHeight: number): void {
+    this.countLabel.visible = this.displayedHp > 0;
+    if (count !== this.labelCount) {
+      this.labelCount = count;
+      const context = this.countCanvas.getContext('2d')!;
+      context.clearRect(0, 0, 160, 64);
+      context.font = 'bold 38px ui-monospace, monospace';
+      const width = Math.max(54, context.measureText(String(count)).width + 24), left = (160 - width) / 2;
+      context.fillStyle = '#14231feb'; context.fillRect(left, 5, width, 54);
+      context.strokeStyle = this.unit.team ? '#cf8e7b' : '#7babc9'; context.lineWidth = 3; context.strokeRect(left, 5, width, 54);
+      context.fillStyle = '#ffffff'; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText(String(count), 80, 33);
+      this.countLabel.material.map!.needsUpdate = true;
+    }
+    // Keep the badge just in front of the occupied base, clear of the body.
+    // It stays in the 3D scene, so nearer units/obstacles can cover it.
+    const center = this.visualPosition(), offset = camera.position.clone().sub(center); offset.y = 0;
+    offset.normalize().multiplyScalar(1.02);
+    this.countLabel.position.copy(center).add(offset).sub(this.root.position).applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.root.rotation.y);
+    this.countLabel.position.y = .06;
+    const depth = -center.add(offset).applyMatrix4(camera.matrixWorldInverse).z;
+    const height = 22 / viewportHeight * 2 * Math.max(.1, depth) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / camera.zoom;
+    this.countLabel.scale.set(height * 2.5, height, 1);
   }
   async setAsset(asset: Asset): Promise<void> {
     const revision = ++this.assetRevision;
@@ -177,6 +207,7 @@ export class UnitView {
     this.disposeDummy();
     this.ring.geometry.dispose(); this.ring.material.dispose();
     this.proxy.geometry.dispose(); (this.proxy.material as THREE.Material).dispose();
+    this.countLabel.material.map?.dispose(); this.countLabel.material.dispose();
     this.root.removeFromParent();
   }
   play(name: string, once = false): number {

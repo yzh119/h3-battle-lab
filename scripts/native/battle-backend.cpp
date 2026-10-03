@@ -473,8 +473,20 @@ public:
         legal["moves"].Vector(); legal["shots"].Vector(); legal["melee"].Vector(); legal["heals"].Vector();
         legal["wait"].Bool() = false; legal["defend"].Bool() = false;
         result["queue"].Vector();
+        for (auto & unit : result["units"].Vector()) unit["movement"].Vector();
         if (game->currentBattles.empty() || !result["winner"].isNull()) return result;
         const auto & battle = *game->currentBattles.front();
+        // Inspection is available for either side, independently of whose turn
+        // it is. Native reachability includes obstacles, spells and wide bodies.
+        for (const auto * stack : battle.battleGetAllStacks())
+        {
+            if (!stack->alive()) continue;
+            auto unit = std::find_if(result["units"].Vector().begin(), result["units"].Vector().end(),
+                [&](const JsonNode & entry) { return entry["id"].Integer() == stack->unitId(); });
+            if (unit == result["units"].Vector().end()) continue;
+            for (const auto & hex : battle.battleGetOccupiableHexes(stack, true))
+                (*unit)["movement"].Vector().emplace_back(hex.toInt());
+        }
         const auto * actor = battle.battleActiveUnit();
         if (!actor) return result;
         legal["wait"].Bool() = !actor->waited(); legal["defend"].Bool() = true;

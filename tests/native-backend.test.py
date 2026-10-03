@@ -117,6 +117,36 @@ class NativeBackendTests(unittest.TestCase):
         for unit in state["units"]:
             self.assertEqual(unit["count"], armies[unit["side"]][unit["slot"]]["count"])
 
+    def test_movement_inspection_covers_both_sides_and_wide_footprints(self):
+        response = self.request('create', seed=1337,
+            armies=[[{'creature': 10, 'count': 20}, {'creature': 0, 'count': 20}],
+                    [{'creature': 69, 'count': 20}, {'creature': 58, 'count': 20}]],
+            scenario={'terrain': 2, 'battlefield': 'core:grass_hills', 'obstacles': True, 'layout': 148})
+        self.assertTrue(response['ok'], response.get('error'))
+        state = response['result']['state']
+        for unit in state['units']:
+            reachable = set(unit['movement'])
+            self.assertGreater(len(reachable), len(unit['footprint']))
+            self.assertTrue(set(unit['footprint']).issubset(reachable))
+            blocked = set(state['obstacles']) | {hex for other in state['units'] if other['id'] != unit['id'] for hex in other['footprint']}
+            self.assertFalse(reachable & blocked)
+            self.assertTrue(all(0 < hex % 17 < 16 for hex in reachable))
+        actor = next(u for u in state['units'] if u['id'] == state['activeStack'])
+        offsets = [hex - actor['hex'] for hex in actor['footprint']]
+        expected = set(actor['footprint']) | {move['hex'] + offset for move in state['legal']['moves'] for offset in offsets}
+        self.assertEqual(set(actor['movement']), expected)
+        self.assertEqual(self.request('state')['result']['state'], state)
+
+    def test_nonactive_enemy_movement_inspection_uses_current_spell_effects(self):
+        state = self.hero_battle([54])  # Slow
+        enemy = next(u for u in state['units'] if u['side'] == 1)
+        after = self.act(state, 'spell', spell=54, targets=[{'unit': enemy['id']}])['state']
+        slowed = next(u for u in after['units'] if u['id'] == enemy['id'])
+        self.assertEqual(after['activeStack'], state['activeStack'])
+        self.assertLess(slowed['speed'], enemy['speed'])
+        self.assertLess(len(slowed['movement']), len(enemy['movement']))
+        self.assertTrue(set(slowed['movement']).issubset(enemy['movement']))
+
     def test_sparse_slots_remain_stable_and_duplicate_slots_are_rejected(self):
         state = self.create([{"creature": 3, "count": 73, "slot": 6, "hex": 90}, {"creature": 0, "count": 12, "slot": 2}], [{"creature": 58, "count": 20, "slot": 4, "hex": 96}])
         self.assertEqual(sorted((u["side"], u["slot"]) for u in state["units"]), [(0, 2), (0, 6), (1, 4)])

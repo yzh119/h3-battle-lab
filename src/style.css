@@ -17,3 +17,5 @@ button:disabled,input:disabled{opacity:.45;cursor:default}#start-battle{width:10
 #unit-tooltip{position:fixed;z-index:30;pointer-events:none;max-width:280px;padding:12px 16px;border:1px solid #d6bd83;border-radius:8px;background:#19231ff2;color:#f5edda;box-shadow:0 8px 28px #0008;font-size:13px;line-height:1.7}#unit-tooltip strong{display:block;color:#e8cd92;margin-bottom:5px}#unit-tooltip div{white-space:pre-line}
 
 .hero-config{margin:12px 0;padding:10px;border:1px solid #ffffff24}.hero-config legend{color:#ddc895}.hero-config label{display:block;margin:7px 0}.hero-config .switch{display:flex}.hero-config input[type=number]{width:100%;margin-top:4px}.hero-config select[multiple]{height:140px}#spell-target{max-width:100%}
+
+#stack-labels{width:1px;height:1px;inset:auto;clip-path:inset(50%);overflow:hidden;white-space:nowrap}.stack-badge{position:static;transform:none}#attack-selected{width:100%;margin-top:6px}#battle:focus{outline:none}

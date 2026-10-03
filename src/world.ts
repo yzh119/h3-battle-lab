@@ -17,6 +17,11 @@ export function worldPosition(h: Hex): THREE.Vector3 {
 function random(seed: number) { let n = seed; return () => { n = (Math.imul(n, 1664525) + 1013904223) >>> 0; return n / 4294967296; }; }
 
 export function createWorld(canvas: HTMLCanvasElement) {
+  canvas.tabIndex = 0;
+  canvas.setAttribute('aria-label', '战场视角');
+  // A closed select/input can retain focus after a pointer click on an
+  // unfocusable canvas, causing movement shortcuts to remain suppressed.
+  canvas.addEventListener('pointerdown', () => canvas.focus({ preventScroll: true }));
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -52,6 +57,7 @@ export function createWorld(canvas: HTMLCanvasElement) {
       }
     }
     if (controls.enabled) controls.update();
+    camera.updateMatrixWorld();
   }
   const ambient = new THREE.HemisphereLight('#d6e5ee', '#66513a', 1.25); scene.add(ambient);
   const sun = new THREE.DirectionalLight('#ffe0a4', 3.2); sun.position.set(-16, 28, 13); sun.castShadow = true;
@@ -82,9 +88,23 @@ export function createWorld(canvas: HTMLCanvasElement) {
     const p = worldPosition(cell);
     const mesh = new THREE.Mesh(tile, new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }));
     mesh.position.copy(p); mesh.position.y = .02; mesh.userData.cell = cell; scene.add(mesh); if (isPlayable(cell)) pickable.push(mesh);
-    const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: '#f3e8ba', transparent: true, opacity: .52 })); line.position.copy(p); grid.add(line);
+    const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: '#fff1c6', transparent: true, opacity: .72 })); line.position.copy(p); grid.add(line);
   }
+  // A subtle dark border retains contrast on pale sand/snow; WebGL line widths
+  // alone cannot make the outline thicker across browsers.
+  const borderGeometry = new THREE.RingGeometry(RADIUS - .023, RADIUS + .023, 6, 1, Math.PI / 6); borderGeometry.rotateX(-Math.PI / 2);
+  const borders = new THREE.InstancedMesh(borderGeometry, new THREE.MeshBasicMaterial({ color: '#3d3829', transparent: true, opacity: .3, depthWrite: false, side: THREE.DoubleSide }), cells.length);
+  cells.forEach((cell, i) => { const p = worldPosition(cell); borders.setMatrixAt(i, new THREE.Matrix4().makeTranslation(p.x, .019, p.z)); }); grid.add(borders);
   scene.add(grid); grid.visible = true;
+  const rangeMaterial = new THREE.MeshBasicMaterial({ color: '#4a9bd5', transparent: true, opacity: .3, depthWrite: false, side: THREE.DoubleSide });
+  const range = new THREE.InstancedMesh(tile, rangeMaterial, cells.length); range.count = 0; scene.add(range);
+  let rangeHexes: number[] = [];
+  function showMovementRange(hexes: number[], team: number) {
+    rangeHexes = [...new Set(hexes)]; range.count = rangeHexes.length;
+    rangeMaterial.color.set(team ? '#cf624f' : '#4a9bd5');
+    rangeHexes.forEach((hex, i) => { const p = worldPosition(fromHexId(hex)); range.setMatrixAt(i, new THREE.Matrix4().makeTranslation(p.x, .028, p.z)); });
+    range.instanceMatrix.needsUpdate = true; range.computeBoundingSphere();
+  }
   const hover = new THREE.Mesh(tile, new THREE.MeshBasicMaterial({ color: '#cce6b9', transparent: true, opacity: .18, depthWrite: false })); hover.position.y = .03; hover.visible = false; scene.add(hover);
   const path = new THREE.Group(); scene.add(path);
   const pathMaterial = new THREE.MeshBasicMaterial({ color: '#b3d8bf', transparent: true, opacity: .18, depthWrite: false });
@@ -244,5 +264,5 @@ export function createWorld(canvas: HTMLCanvasElement) {
     const bg = dusk ? '#66788a' : '#9aa79f'; if (!plateMode) scene.background = new THREE.Color(bg); scene.fog?.color.set(bg);
     sun.color.set(dusk ? '#bacfea' : '#ffe0a4'); sun.intensity = dusk ? 1.8 : 3.2; ambient.intensity = dusk ? .8 : 1.25;
   }
-  return { renderer, scene, camera, controls, updateCamera, grid, pickable, hover, showPath, setObstacles, setTerrain, terrain: () => terrainId, obstacleCount: () => obstacleGroup.children.length, frameUnit, resetCamera, setMood, sun, zoomBy, setBackdrop, freeCamera, isBackdrop: () => plateMode, environment: () => environmentId, setEnvironment, clearEnvironment };
+  return { renderer, scene, camera, controls, updateCamera, grid, pickable, hover, showPath, showMovementRange, movementRange: () => [...rangeHexes], setObstacles, setTerrain, terrain: () => terrainId, obstacleCount: () => obstacleGroup.children.length, frameUnit, resetCamera, setMood, sun, zoomBy, setBackdrop, freeCamera, isBackdrop: () => plateMode, environment: () => environmentId, setEnvironment, clearEnvironment };
 }

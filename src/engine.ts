@@ -5,7 +5,7 @@ export interface NativeUnit {
   casts?: number; spells?: (SpellDefinition & { castable: boolean })[];
   count: number; health: number; maxHealth: number; topHealth: number; shots: number;
   attack: number; defense: number; minDamage: number; maxDamage: number;
-  speed: number; flying: boolean; footprint: number[];
+  speed: number; flying: boolean; footprint: number[]; movement?: number[];
 }
 export interface EngineState {
   scenario?: ScenarioConfig;
