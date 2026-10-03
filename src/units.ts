@@ -65,7 +65,14 @@ export class UnitView {
     if (this.disposed || revision !== this.assetRevision) return;
     const model = clone(gltf.scene);
     model.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(model); const height = box.max.y - box.min.y;
+    // Scene variants start inactive at zero scale. Including their skinned
+    // meshes in bounds can divide by a singular bind matrix and produce NaN.
+    const box = new THREE.Box3();
+    for (const child of model.children) {
+      if (child.scale.x === 0 || child.scale.y === 0 || child.scale.z === 0) continue;
+      box.expandByObject(child);
+    }
+    const height = box.max.y - box.min.y;
     if (!Number.isFinite(height) || height <= 0) throw new Error('模型没有有效的立体尺寸');
     const wrapper = new THREE.Group(); model.position.y -= box.min.y;
     wrapper.add(model); wrapper.scale.setScalar((asset.height ?? 2.35) / height);

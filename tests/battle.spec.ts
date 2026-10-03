@@ -168,3 +168,16 @@ test('native attributes appear on hover and VCMI AI can take turns', async ({ pa
   await expect.poll(async () => (await snapshot(page)).state.revision, { timeout: 30000 }).toBeGreaterThan(revision + 2);
   await page.locator('#ai-red').uncheck(); await page.locator('#ai-blue').uncheck();
 });
+
+test('local model with alternate skeleton scenes loads and animates', async ({ page, request }) => {
+  const response = await request.get('/local-assets/manifest.json');
+  test.skip(!response.headers()['content-type']?.includes('json'), 'Private art is absent');
+  const manifest = await response.json(); test.skip(!manifest.units.cavalier, 'Alternate skeleton export absent');
+  await open(page); await expect(page.locator('#replace-unit')).toBeEnabled();
+  await page.locator('#creature-picker').selectOption('cavalier'); await page.locator('#replace-unit').click();
+  await expect.poll(async () => (await snapshot(page)).units[0].kind).toBe('cavalier');
+  expect((await snapshot(page)).units[0].imported).toBe(true);
+  await page.getByRole('button', { name: '行走', exact: true }).click();
+  await page.waitForTimeout(100); const pose = (await snapshot(page)).units[0].pose;
+  await expect.poll(async () => (await snapshot(page)).units[0].pose).not.toBe(pose);
+});
