@@ -126,6 +126,87 @@ def pack_clips(exports, output, geometry_clip=None):
     return [{'name': a['name'], 'channels': len(a['channels'])} for a in base['animations']]
 
 
+def pack_scene_variants(exports, output):
+    """Keep clip-specific rigs/geometry intact when an action changes hierarchy."""
+    base = {'asset': {'version': '2.0'}, 'scene': 0, 'scenes': [{'nodes': []}]}
+    keys = ['nodes', 'meshes', 'skins', 'materials', 'textures', 'images', 'samplers', 'accessors', 'bufferViews', 'animations']
+    for key in keys: base[key] = []
+    binary = bytearray()
+    groups = []
+    for label, source in exports:
+        doc, data = read_glb(source)
+        assert len(doc.get('animations', [])) == 1, 'Expected one scene animation'
+        offsets = {key: len(base[key]) for key in keys}
+        while len(binary) % 4: binary.append(0)
+        byte_offset = len(binary); binary.extend(data)
+        for key in keys:
+            for item in copy.deepcopy(doc.get(key, [])):
+                if key == 'bufferViews':
+                    item['buffer'] = 0; item['byteOffset'] = item.get('byteOffset', 0) + byte_offset
+                elif key == 'accessors':
+                    if 'sparse' in item:
+                        for part in ['indices', 'values']: item['sparse'][part]['bufferView'] += offsets['bufferViews']
+                    if 'bufferView' in item: item['bufferView'] += offsets['bufferViews']
+                elif key == 'images':
+                    if 'bufferView' in item: item['bufferView'] += offsets['bufferViews']
+                elif key == 'textures':
+                    for field, target in [('source', 'images'), ('sampler', 'samplers')]:
+                        if field in item: item[field] += offsets[target]
+                elif key == 'materials':
+                    def textures(value):
+                        if isinstance(value, dict):
+                            for field, child in value.items():
+                                if field.endswith('Texture') and isinstance(child, dict) and 'index' in child: child['index'] += offsets['textures']
+                                else: textures(child)
+                        elif isinstance(value, list):
+                            for child in value: textures(child)
+                    textures(item)
+                elif key == 'meshes':
+                    for primitive in item['primitives']:
+                        for field, target in [('indices', 'accessors'), ('material', 'materials')]:
+                            if field in primitive: primitive[field] += offsets[target]
+                        primitive['attributes'] = {k: v + offsets['accessors'] for k, v in primitive['attributes'].items()}
+                        for target in primitive.get('targets', []):
+                            for k in target: target[k] += offsets['accessors']
+                elif key == 'nodes':
+                    for field, target in [('mesh', 'meshes'), ('skin', 'skins')]:
+                        if field in item: item[field] += offsets[target]
+                    if 'children' in item: item['children'] = [v + offsets['nodes'] for v in item['children']]
+                    item['name'] = label + ':' + item.get('name', 'node')
+                elif key == 'skins':
+                    item['joints'] = [v + offsets['nodes'] for v in item['joints']]
+                    if 'skeleton' in item: item['skeleton'] += offsets['nodes']
+                    if 'inverseBindMatrices' in item: item['inverseBindMatrices'] += offsets['accessors']
+                elif key == 'animations':
+                    item['name'] = label
+                    for sampler in item['samplers']:
+                        for field in ['input', 'output']: sampler[field] += offsets['accessors']
+                    for channel in item['channels']: channel['target']['node'] += offsets['nodes']
+                base[key].append(item)
+        for key in ['extensionsUsed', 'extensionsRequired']:
+            base[key] = sorted(set(base.get(key, [])) | set(doc.get(key, [])))
+        group = len(base['nodes']); groups.append(group)
+        base['nodes'].append({'name': label + ':scene', 'children': [v + offsets['nodes'] for v in doc['scenes'][doc.get('scene', 0)]['nodes']], 'scale': [1, 1, 1] if len(groups) == 1 else [0, 0, 0]})
+        base['scenes'][0]['nodes'].append(group)
+    for index, clip in enumerate(base['animations']):
+        for selected, group in enumerate(groups):
+            refs = []
+            for values, kind in [([0.0], 'SCALAR'), ([1.0 if selected == index else 0.0] * 3, 'VEC3')]:
+                while len(binary) % 4: binary.append(0)
+                payload = struct.pack('<' + 'f' * len(values), *values)
+                view = len(base['bufferViews']); base['bufferViews'].append({'buffer': 0, 'byteOffset': len(binary), 'byteLength': len(payload)}); binary.extend(payload)
+                refs.append(len(base['accessors'])); accessor = {'bufferView': view, 'componentType': 5126, 'count': 1, 'type': kind}
+                if kind == 'SCALAR': accessor.update({'min': [0], 'max': [0]})
+                base['accessors'].append(accessor)
+            sampler = len(clip['samplers']); clip['samplers'].append({'input': refs[0], 'output': refs[1], 'interpolation': 'STEP'})
+            clip['channels'].append({'sampler': sampler, 'target': {'node': group, 'path': 'scale'}})
+    while len(binary) % 4: binary.append(0)
+    base['buffers'] = [{'byteLength': len(binary)}]
+    encoded = json.dumps(base, separators=(',', ':')).encode(); encoded += b' ' * (-len(encoded) % 4)
+    Path(output).write_bytes(struct.pack('<III', 0x46546C67, 2, 28 + len(encoded) + len(binary)) + struct.pack('<II', len(encoded), 0x4E4F534A) + encoded + struct.pack('<II', len(binary), 0x004E4942) + binary)
+    return [{'name': a['name'], 'channels': len(a['channels'])} for a in base['animations']]
+
+
 def main():
     import bpy
 
@@ -165,6 +246,14 @@ def main():
                 source = Path(filename)
                 bpy.ops.wm.open_mainfile(filepath=str(source))
                 scene = bpy.context.scene
+                override = entry.get('actions', {}).get(action)
+                if override:
+                    rig = bpy.data.objects[override['rig']]
+                    assert rig.type == 'ARMATURE', 'Configured action needs an armature'
+                    assert isinstance(override['frames'], int) and override['frames'] > 0
+                    rig.animation_data_create()
+                    rig.animation_data.action = bpy.data.actions[override['action']]
+                    scene.frame_start, scene.frame_end = 1, override['frames']
                 scene.frame_set(scene.frame_start)
                 bpy.ops.object.select_all(action='DESELECT')
                 for obj in scene.objects:
@@ -178,7 +267,7 @@ def main():
                                           export_frame_range=True, export_anim_slide_to_zero=True,
                                           export_cameras=False, export_lights=False)
                 exports.append((action, path))
-            clips = pack_clips(exports, opts.out / (identifier + '.glb'), entry.get('geometryClip'))
+            clips = pack_scene_variants(exports, opts.out / (identifier + '.glb')) if entry.get('sceneVariants') else pack_clips(exports, opts.out / (identifier + '.glb'), entry.get('geometryClip'))
         manifest['units'][identifier] = {'label': entry.get('label', labels.get(identifier, identifier)),
                                         'url': f'/local-assets/{identifier}.glb', 'height': entry.get('height', 2.35), 'clips': clips,
                                         'faction': entry.get('faction', '墓园'), 'draft': entry.get('draft', False)}

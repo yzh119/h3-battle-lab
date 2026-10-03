@@ -13,3 +13,5 @@ button:disabled,input:disabled{opacity:.45;cursor:default}#start-battle{width:10
 #army-slots{position:absolute;left:300px;right:28px;bottom:108px;display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:10px 14px;background:#172327eb;border:1px solid #e3dec321;border-radius:5px;margin:0}.army-slot-group{min-width:0}.army-slot-group p{margin:0 0 5px}.army-slot-row{grid-template-columns:repeat(7,minmax(0,1fr))}.army-slot{min-height:50px;font-size:10px;padding:5px 3px}@media(max-width:1000px){#army-slots{grid-template-columns:1fr;gap:10px;right:12px}.army-slot{min-height:36px}}@media(max-width:760px){#army-slots{left:215px;padding:8px;bottom:95px}.army-slot{font-size:9px}}
 
 #ten-week-armies{width:100%;margin-top:10px;color:#e3d5ab}.preset-note{font-size:10px;color:#bac6b5;line-height:1.6}
+
+#unit-tooltip{position:fixed;z-index:30;pointer-events:none;max-width:280px;padding:12px 16px;border:1px solid #d6bd83;border-radius:8px;background:#19231ff2;color:#f5edda;box-shadow:0 8px 28px #0008;font-size:13px;line-height:1.7}#unit-tooltip strong{display:block;color:#e8cd92;margin-bottom:5px}#unit-tooltip div{white-space:pre-line}

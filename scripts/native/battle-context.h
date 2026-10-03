@@ -70,6 +70,10 @@ JsonNode snapshot(const CGameState & state)
         unit["maxHealth"].Integer() = stack->getMaxHealth();
         unit["topHealth"].Integer() = stack->getFirstHPleft();
         unit["speed"].Integer() = stack->getMovementRange();
+        unit["attack"].Integer() = stack->getAttack(false);
+        unit["defense"].Integer() = stack->getDefense(false);
+        unit["minDamage"].Integer() = stack->getMinDamage(false);
+        unit["maxDamage"].Integer() = stack->getMaxDamage(false);
         unit["flying"].Bool() = stack->hasBonusOfType(BonusType::FLYING);
         for (const auto & hex : stack->getHexes()) unit["footprint"].Vector().emplace_back(hex.toInt());
         units.push_back(std::move(unit));

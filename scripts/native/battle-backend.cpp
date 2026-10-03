@@ -6,7 +6,21 @@
 #include "lib/battle/ReachabilityInfo.h"
 #include "server/queries/BattleQueries.h"
 #include "server/queries/QueriesProcessor.h"
+#include "AI/BattleAI/BattleEvaluator.h"
+#include "lib/callback/CBattleCallback.h"
+#include "lib/battle/CPlayerBattleCallback.h"
 #include <cmath>
+
+class AIEnvironment final : public Environment
+{
+    const CGameState & gameState;
+    std::shared_ptr<CBattleCallback> callback;
+public:
+    AIEnvironment(const CGameState & game, std::shared_ptr<CBattleCallback> cb) : gameState(game), callback(std::move(cb)) {}
+    const Services * services() const override { return LIBRARY; }
+    const BattleCb * battle(const BattleID & id) const override { return callback->getBattle(id).get(); }
+    const GameCb * game() const override { return &gameState; }
+};
 
 void fields(const JsonNode & value, std::initializer_list<std::string> allowed)
 {
@@ -68,6 +82,7 @@ JsonNode catalogue()
     result["rulesProfile"].String() = "base-reference";
     result["customPacks"].Bool() = false;
     result["heroSpells"].Bool() = false;
+    result["battleAI"].String() = "VCMI BattleEvaluator";
     result["tenWeekTownArmies"] = tenWeekTownArmies();
     for (int id = 0; id < 70; ++id)
     {
@@ -79,6 +94,11 @@ JsonNode catalogue()
         entry["label"].String() = creature->getNameSingularTranslated();
         entry["health"].Integer() = creature->getBaseHitPoints();
         entry["speed"].Integer() = creature->getBaseSpeed();
+        entry["attack"].Integer() = creature->getBaseAttack();
+        entry["defense"].Integer() = creature->getBaseDefense();
+        entry["minDamage"].Integer() = creature->getBaseDamageMin();
+        entry["maxDamage"].Integer() = creature->getBaseDamageMax();
+        entry["shots"].Integer() = creature->getBaseShots();
         entry["doubleWide"].Bool() = creature->isDoubleWide();
         result["creatures"].Vector().push_back(std::move(entry));
     }
@@ -244,7 +264,23 @@ public:
         if (!request["action"].isString()) throw std::runtime_error("Missing action");
         const auto & action = request["action"].String();
         BattleAction native;
-        if (action == "wait" && current["legal"]["wait"].Bool()) native = BattleAction::makeWait(actor);
+        if (action == "ai")
+        {
+            const auto side = actor->unitSide();
+            const auto player = battle.sideToPlayer(side);
+            auto callback = std::make_shared<CBattleCallback>(player, nullptr);
+            callback->onBattleStarted(&battle);
+            auto environment = std::make_shared<AIEnvironment>(*game, callback);
+            int64_t ours = 0, theirs = 0;
+            for (const auto * unit : battle.battleGetAllStacks())
+                if (unit->alive()) (unit->unitSide() == side ? ours : theirs) += static_cast<int64_t>(unit->getCount()) * unit->unitType()->getAIValue();
+            BattleEvaluator evaluator(environment, callback, actor, player, BattleID(0), side,
+                theirs ? static_cast<float>(ours) / theirs : 1.0f, 2);
+            const auto * stack = battle.battleGetStackByID(actor->unitId());
+            if (!stack) throw std::runtime_error("Missing AI stack");
+            native = evaluator.selectStackAction(stack);
+        }
+        else if (action == "wait" && current["legal"]["wait"].Bool()) native = BattleAction::makeWait(actor);
         else if (action == "defend") native = BattleAction::makeDefend(actor);
         else if (action == "move")
         {
@@ -314,6 +350,12 @@ int main()
                 const auto op = request["op"].String();
                 JsonNode payload;
                 if (op == "catalogue") { fields(request, {"version", "requestId", "op"}); payload = catalogue(); }
+                else if (op == "deployment")
+                {
+                    auto preview = std::make_unique<BattleSession>(request);
+                    payload["state"] = preview->state();
+                    payload["events"].Vector();
+                }
                 else if (op == "create")
                 {
                     auto candidate = std::make_unique<BattleSession>(request);

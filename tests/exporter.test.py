@@ -54,6 +54,33 @@ class ClipPackingTests(unittest.TestCase):
                 view = doc['bufferViews'][accessor['bufferView']]
                 self.assertEqual(struct.unpack_from('<fff', data, view['byteOffset']), expected)
 
+    def test_scene_variants_keep_different_rigs_and_switch_visibility(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_glb(root / 'idle.glb', [{'name': 'HumanRig', 'children': [1]}, {'name': 'Hand'}], [1])
+            write_glb(root / 'walk.glb', [{'name': 'FlightRoot', 'children': [1]}, {'name': 'BatRig', 'children': [2]}, {'name': 'Wing'}], [0, 2])
+            for name in ['idle', 'walk']:
+                doc, _ = exporter.read_glb(root / (name + '.glb'))
+                self.assertTrue(doc['nodes'])
+            # Supply scene roots as Blender exports do.
+            original_read = exporter.read_glb
+            def read(path):
+                doc, data = original_read(path)
+                if 'scenes' not in doc: doc['scenes'] = [{'nodes': [0]}]
+                return doc, data
+            exporter.read_glb = read
+            try: exporter.pack_scene_variants([('idle', root / 'idle.glb'), ('walk', root / 'walk.glb')], root / 'combined.glb')
+            finally: exporter.read_glb = original_read
+            doc, data = original_read(root / 'combined.glb')
+            self.assertEqual(doc['scenes'][0]['nodes'], [2, 6])
+            self.assertEqual([c['target']['node'] for c in doc['animations'][1]['channels'][:2]], [3, 5])
+            for index, clip in enumerate(doc['animations']):
+                for group_index, group in enumerate([2, 6]):
+                    channel = next(c for c in clip['channels'] if c['target'] == {'node': group, 'path': 'scale'})
+                    sampler = clip['samplers'][channel['sampler']]
+                    view = doc['bufferViews'][doc['accessors'][sampler['output']]['bufferView']]
+                    self.assertEqual(struct.unpack_from('<fff', data, view['byteOffset']), (1, 1, 1) if index == group_index else (0, 0, 0))
+
     def test_ambiguous_siblings_and_cycles_are_rejected(self):
         with self.assertRaisesRegex(AssertionError, 'unique hierarchical'):
             exporter.node_paths({'nodes': [{'name': 'Rig', 'children': [1, 2]}, {'name': 'Hand'}, {'name': 'Hand'}]})

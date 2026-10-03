@@ -50,9 +50,9 @@ export function createWorld(canvas: HTMLCanvasElement) {
     const p = worldPosition(cell);
     const mesh = new THREE.Mesh(tile, new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }));
     mesh.position.copy(p); mesh.position.y = .02; mesh.userData.cell = cell; scene.add(mesh); if (isPlayable(cell)) pickable.push(mesh);
-    const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: '#d8d8b1', transparent: true, opacity: .16 })); line.position.copy(p); grid.add(line);
+    const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: '#f3e8ba', transparent: true, opacity: .52 })); line.position.copy(p); grid.add(line);
   }
-  scene.add(grid); grid.visible = false;
+  scene.add(grid); grid.visible = true;
   const hover = new THREE.Mesh(tile, new THREE.MeshBasicMaterial({ color: '#cce6b9', transparent: true, opacity: .18, depthWrite: false })); hover.position.y = .03; hover.visible = false; scene.add(hover);
   const path = new THREE.Group(); scene.add(path);
   const pathMaterial = new THREE.MeshBasicMaterial({ color: '#b3d8bf', transparent: true, opacity: .18, depthWrite: false });

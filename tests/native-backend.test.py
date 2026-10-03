@@ -137,6 +137,32 @@ class NativeBackendTests(unittest.TestCase):
         self.assertIsNone(reset.get("winner"))
         self.assertEqual(reset["revision"], 0)
 
+    def test_attributes_and_deployment_preview_preserve_active_battle(self):
+        catalogue = self.request('catalogue')['result']
+        marksman = next(c for c in catalogue['creatures'] if c['id'] == 3)
+        self.assertEqual((marksman['attack'], marksman['defense'], marksman['minDamage'], marksman['maxDamage'], marksman['shots']), (6, 3, 2, 3, 24))
+        armies = [[{'creature': 3, 'count': 20, 'slot': 5}], [{'creature': 58, 'count': 10, 'slot': 2}]]
+        active = self.create(*armies)
+        preview = self.request('deployment', seed=1337, armies=armies)
+        self.assertTrue(preview['ok'], preview.get('error'))
+        self.assertEqual(preview['result']['state']['units'], active['units'])
+        defended = self.act(active, 'defend')['state']
+        actor = next(u for u in defended['units'] if u['id'] == active['activeStack'])
+        self.assertGreater(actor['defense'], marksman['defense'])
+        self.assertEqual(actor['attack'], marksman['attack'])
+
+    def test_real_vcmi_ai_shoots_and_completes_battle(self):
+        self.assertEqual(self.request('catalogue')['result']['battleAI'], 'VCMI BattleEvaluator')
+        state = self.create([{'creature': 3, 'count': 100}], [{'creature': 58, 'count': 5}])
+        first = self.act(state, 'ai')
+        self.assertTrue(any(e.get('ranged') for e in first['events']))
+        self.assertFalse(self.request('act', revision=state['revision'], stack=state['activeStack'], action='ai')['ok'])
+        state = first['state']
+        for _ in range(30):
+            if state.get('winner') is not None: break
+            state = self.act(state, 'ai')['state']
+        self.assertEqual(state.get('winner'), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
