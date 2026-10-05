@@ -61,6 +61,10 @@ def bake_object(obj, path, resolution, channel="Base Color"):
     bpy.ops.object.select_all(action='DESELECT')
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
+    # Bake can clear active image targets even in unused material slots. If an
+    # old slot points at a source texture, this destroys the colour being sampled
+    # and produces a circular dependency. These copied scenes need only used slots.
+    bpy.ops.object.material_slot_remove_unused()
     if not obj.data.uv_layers:
         obj.data.uv_layers.new(name='BakedBaseColorUV')
         bpy.ops.object.mode_set(mode='EDIT')
