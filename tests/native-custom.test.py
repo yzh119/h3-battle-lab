@@ -25,7 +25,9 @@ class NativeCustomTests(unittest.TestCase):
         no_retaliation = authoring.creature('custom-no-retaliation', [{'type': 'retaliations', 'count': 0}]); no_retaliation['stats']['speed'] = 1
         two_retaliations = authoring.creature('custom-two-retaliations', [{'type': 'retaliations', 'count': 2}]); two_retaliations['stats']['speed'] = 1
         plain = authoring.creature('custom-shooter', [{'type': 'shooter', 'shots': 12, 'noDistancePenalty': True}])
-        pack = {'version': 1, 'creatures': [guard, shooter, undead, living, regen, no_retaliation, two_retaliations, plain]}
+        sweep = authoring.creature('custom-sweep', [{'type': 'attacksAllAdjacent'}, {'type': 'blocksRetaliation'}])
+        sweep['doubleWide'] = True
+        pack = {'version': 1, 'creatures': [guard, shooter, undead, living, regen, no_retaliation, two_retaliations, plain, sweep]}
         profile = converter.prepare(os.environ['BATTLE_LAB_PROFILE'], Path(self.directory.name) / 'profile', pack)
         self.engine = native.NativeBackendTests(); self.engine.profile = profile; self.engine.setUp()
         self.catalogue = self.engine.request('catalogue')['result']
@@ -34,9 +36,41 @@ class NativeCustomTests(unittest.TestCase):
     def tearDown(self):
         self.engine.tearDown(); self.directory.cleanup()
 
+    def test_ring_attack_reaches_rear_hex_once_and_spares_friends_on_both_sides(self):
+        self.assertIn('attacksAllAdjacent', self.catalogue['customMechanisms'])
+        for side in [0, 1]:
+            rear = 89 if side == 0 else 91
+            # The middle neighbor touches both occupied hexes and must be hit once.
+            main, rear_enemy, shared, friend = (91, 88, 73, 106) if side == 0 else (89, 92, 74, 109)
+            army = [{'creature': self.ids['custom-sweep'], 'count': 1, 'hex': 90},
+                    {'creature': self.ids['custom-living'], 'count': 1, 'hex': friend}]
+            opponents = [{'creature': self.ids['custom-living'], 'count': 1, 'hex': h}
+                         for h in [main, rear_enemy, shared, 96]]
+            armies = [army, opponents] if side == 0 else [opponents, army]
+            state = self.engine.create(*armies)
+            actor = next(u for u in state['units'] if u['id'] == state['activeStack'])
+            self.assertEqual(actor['side'], side)
+            self.assertEqual(set(actor['footprint']), {90, rear})
+            occupied = {h for u in state['units'] if u['id'] != actor['id'] for h in u['footprint']}
+            for move in state['legal']['moves']:
+                for h in move['path']:
+                    self.assertTrue({h, h + (-1 if side == 0 else 1)}.isdisjoint(occupied))
+            target = next(u for u in state['units'] if u['hex'] == main)
+            result = self.engine.act(state, 'melee', target=target['id'], **{'from': 90})
+            after = {u['hex']: u for u in result['state']['units']}
+            for h in [main, rear_enemy, shared]:
+                self.assertEqual(after[h]['health'], 93, (side, h, result))
+            for h in [90, friend, 96]: self.assertEqual(after[h]['health'], 100)
+            attacks = [e for e in result['events'] if e['type'] == 'attack']
+            self.assertEqual(len(attacks), 1)
+            self.assertFalse(attacks[0]['counter'])
+            overlap = [dict(u) for u in army]; overlap[1]['hex'] = rear
+            bad = [overlap, opponents] if side == 0 else [opponents, overlap]
+            self.assertFalse(self.engine.request('create', seed=1337, armies=bad)['ok'])
+
     def test_stats_flight_extra_melee_and_blocked_retaliation(self):
         self.assertEqual(self.catalogue['rulesProfile'], 'custom-reference')
-        self.assertEqual(len(self.catalogue['creatures']), 36)
+        self.assertEqual(len(self.catalogue['creatures']), 37)
         state = self.engine.create([{'creature': self.ids['custom-guard'], 'count': 1, 'hex': 90}], [{'creature': 58, 'count': 20, 'hex': 91}])
         guard = next(u for u in state['units'] if u['side'] == 0)
         self.assertEqual([guard[k] for k in ['maxHealth', 'attack', 'defense', 'speed', 'flying']], [100, 10, 10, 10, True])

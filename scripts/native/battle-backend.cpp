@@ -215,7 +215,7 @@ JsonNode catalogue()
     result["equipment"] = artifactCatalogue();
     result["rulesProfile"].String() = customDefinitions.empty() ? "base-reference" : "custom-reference";
     result["customPacks"].Bool() = true;
-    for (const auto * mechanism : {"flying", "additionalAttacks", "regeneration", "retaliations", "blocksRetaliation", "shooter", "undead", "deathCloud"})
+    for (const auto * mechanism : {"flying", "additionalAttacks", "regeneration", "retaliations", "blocksRetaliation", "attacksAllAdjacent", "shooter", "undead", "deathCloud"})
         result["customMechanisms"].Vector().emplace_back(mechanism);
     result["heroSpells"].Bool() = true;
     result["creatureSpells"].Bool() = true;

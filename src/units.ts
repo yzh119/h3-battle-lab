@@ -6,7 +6,7 @@ import { fromHexId } from './presentation.ts';
 import { worldPosition, type EnvironmentAsset } from './world.ts';
 
 export interface Asset { label: string; url: string; height?: number; faction?: string; draft?: boolean; revision?: string; forward?: '+z' | '-z' | '+x' | '-x' }
-export interface Manifest { environments?: Record<string, EnvironmentAsset>; backgrounds?: { label: string; url: string }[]; units: Record<string, Asset> }
+export interface Manifest { environments?: Record<string, EnvironmentAsset>; backgrounds?: { label: string; url: string }[]; units: Record<string, Asset>; creaturePack?: string }
 const loader = new GLTFLoader();
 const cache = new Map<string, Promise<GLTF>>();
 function load(url: string) {

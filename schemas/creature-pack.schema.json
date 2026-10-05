@@ -233,12 +233,47 @@
                       "const": "deathCloud"
                     }
                   }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "attacksAllAdjacent"
+                    }
+                  }
                 }
               ]
             }
+          },
+          "doubleWide": {
+            "type": "boolean",
+            "default": false,
+            "description": "Occupies two native battle hexes."
           }
         },
         "allOf": [
+          {
+            "properties": {
+              "mechanisms": {
+                "contains": {
+                  "properties": {
+                    "type": {
+                      "const": "attacksAllAdjacent"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "minContains": 0,
+                "maxContains": 1
+              }
+            }
+          },
           {
             "properties": {
               "mechanisms": {

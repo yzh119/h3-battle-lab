@@ -33,6 +33,7 @@
 | `label`, `faction` | 名称和选择器分组，1–80 字符，不能全为空白 |
 | `ruleset` | 导入兵种必须是 `custom`；内置原版 ID 禁止覆盖，避免自定义平衡污染原版模式 |
 | `stats.health` | 每只生命，1–100,000 |
+| `doubleWide` | 可选布尔值，默认 `false`；`true` 占据两个战斗六角格，移动与邻接由原生引擎处理 |
 | `stats.attack`, `stats.defense` | 基础攻防，0–1,000 |
 | `stats.minDamage`, `stats.maxDamage` | 每只伤害区间，1–100,000；下限不能超过上限 |
 | `stats.speed` | 行动顺序和每回合移动距离，1–50 |
@@ -50,6 +51,7 @@
 | `{ "type": "regeneration", "health": 10 }` | 每回合首次轮到该队时，按 VCMI 当前实现最多恢复这些 HP，只治疗受伤的末只，不能复活或恢复死队；1–100,000 |
 | `{ "type": "retaliations", "count": 2 }` | 每回合最多反击这些次；0–100；省略时为 1；追加攻击不会再次触发反击 |
 | `{ "type": "blocksRetaliation" }` | 自己主动攻击时阻止敌人反击；不消耗敌人的反击额度 |
+| `{ "type": "attacksAllAdjacent" }` | 近战同时攻击自身所有占用格周围的敌人；包含双格生物的后格邻居，同一敌人只受伤一次，不伤友军；不自动禁止反击。映射到原生 `ATTACKS_ALL_ADJACENT` |
 
 转换器映射到 VCMI 的 `FLYING`、`ADDITIONAL_ATTACK`、`HP_REGENERATION`、`ADDITIONAL_RETALIATION`／`NO_RETALIATION`、`BLOCKS_RETALIATION`、`SHOOTER`、`UNDEAD` 和 `SPELL_LIKE_ATTACK` 等 bonus。攻击方式用原生 `effectRange` 限定；死亡之云使用原生 `core:deathCloud`。不会给原版兵种添加或覆盖 bonus。
 
@@ -89,6 +91,8 @@
 
 
 ## 独立 mod 与资源目录
+
+本地清单可添加 `"creaturePack": "/local-assets/custom-creatures.json"`。页面连接原生引擎后，验证并加载该文件，使配套模型对应的兵种直接出现在选择器中。只接受同源 `/local-assets/` 路径和不超过 1 MB 的包；读取、验证或初始化失败时保留原有引擎目录。没有该字段时保持原版参考模式。有该字段时，重新加载页面也会加载这个包并标记为自定义模式；上文的重新加载恢复原版行为仅适用于没有预装包的情况。
 
 需要 Python 3。GUI 导入只在没有战斗和待处理请求时执行，标准 mod 及候选会话位于忽略目录 `.local/native-sessions/`。独立资源目录只引用预先准备的原版数据和必需 `vcmi` 模块，额外启用本仓库生成的 `battle-lab-custom`；不会读取本机其他 mod 或改动 VCMI 源码。
 

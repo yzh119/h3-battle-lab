@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 
 MOD = 'battle-lab-custom'
-MECHANISMS = ['flying', 'additionalAttacks', 'regeneration', 'retaliations', 'blocksRetaliation', 'shooter', 'undead', 'deathCloud']
+MECHANISMS = ['flying', 'additionalAttacks', 'regeneration', 'retaliations', 'blocksRetaliation', 'attacksAllAdjacent', 'shooter', 'undead', 'deathCloud']
 RESERVED = {'pikeman', 'halberdier', 'archer', 'marksman', 'griffin', 'royal-griffin', 'swordsman', 'crusader', 'monk', 'zealot', 'cavalier', 'champion', 'angel', 'archangel', 'skeleton', 'skeleton-warrior', 'zombie', 'zombie-upgraded', 'wight', 'wraith', 'vampire', 'vampire-lord', 'lich', 'power-lich', 'black-knight', 'dread-knight', 'bone-dragon', 'ghost-dragon'}
 
 
@@ -27,7 +27,7 @@ def convert(pack):
     result = {}
     for i, creature in enumerate(pack['creatures']):
         path = f'creatures[{i}]'
-        fields(creature, ['id', 'label', 'faction', 'ruleset', 'stats', 'mechanisms'], path)
+        fields(creature, ['id', 'label', 'faction', 'ruleset', 'stats', 'mechanisms', 'doubleWide'], path)
         identifier = creature.get('id')
         if not isinstance(identifier, str) or not re.fullmatch(r'[a-z][a-z0-9-]{0,63}', identifier) or identifier in RESERVED or identifier in result:
             raise ValueError(f'{path}.id: invalid, reserved or duplicate')
@@ -37,6 +37,8 @@ def convert(pack):
                 raise ValueError(f'{path}.{name}: expected 1–80 characters')
         if creature.get('ruleset') != 'custom':
             raise ValueError(f'{path}.ruleset: custom required')
+        if 'doubleWide' in creature and type(creature['doubleWide']) is not bool:
+            raise ValueError(path + '.doubleWide: expected boolean')
         stats = creature.get('stats')
         fields(stats, ['health', 'attack', 'defense', 'minDamage', 'maxDamage', 'speed', 'aiValue'], path + '.stats')
         for name in ['health', 'minDamage', 'maxDamage']:
@@ -57,9 +59,9 @@ def convert(pack):
             kind = mechanism.get('type')
             if kind not in MECHANISMS or kind in seen: raise ValueError(mp + ': unknown or duplicate mechanism')
             seen.add(kind)
-            if kind in ['flying', 'blocksRetaliation', 'undead', 'deathCloud']:
+            if kind in ['flying', 'blocksRetaliation', 'attacksAllAdjacent', 'undead', 'deathCloud']:
                 fields(mechanism, ['type'], mp)
-                abilities[kind] = {'type': {'flying': 'FLYING', 'blocksRetaliation': 'BLOCKS_RETALIATION', 'undead': 'UNDEAD', 'deathCloud': 'SPELL_LIKE_ATTACK'}[kind]}
+                abilities[kind] = {'type': {'attacksAllAdjacent': 'ATTACKS_ALL_ADJACENT', 'flying': 'FLYING', 'blocksRetaliation': 'BLOCKS_RETALIATION', 'undead': 'UNDEAD', 'deathCloud': 'SPELL_LIKE_ATTACK'}[kind]}
                 if kind == 'deathCloud': abilities[kind]['subtype'] = 'core:deathCloud'
             elif kind == 'additionalAttacks':
                 fields(mechanism, ['type', 'count', 'mode'], mp); integer(mechanism.get('count'), 1, 4, mp + '.count')
@@ -82,7 +84,7 @@ def convert(pack):
         if ('deathCloud' in seen or any(m['type'] == 'additionalAttacks' and m.get('mode') == 'ranged' for m in mechanisms)) and 'shooter' not in seen:
             raise ValueError(path + '.mechanisms: ranged mechanisms require shooter')
         value = {'name': {'singular': creature['label'], 'plural': creature['label']}, 'faction': 'core:neutral', 'level': 1,
-                 'special': True, 'excludeFromRandomization': True, 'cost': {}, 'growth': 0, 'fightValue': stats.get('aiValue', 100), 'aiValue': stats.get('aiValue', 100),
+                 'doubleWide': creature.get('doubleWide', False), 'special': True, 'excludeFromRandomization': True, 'cost': {}, 'growth': 0, 'fightValue': stats.get('aiValue', 100), 'aiValue': stats.get('aiValue', 100),
                  'hitPoints': stats['health'], 'attack': stats['attack'], 'defense': stats['defense'], 'speed': stats['speed'],
                  'damage': {'min': stats['minDamage'], 'max': stats['maxDamage']}, 'abilities': abilities,
                  'graphics': {'animation': 'CPKMAN.DEF'}, 'sound': {}}

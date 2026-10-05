@@ -402,6 +402,22 @@ async function connect() {
   if (busy || state) return; busy = true; updateSelection(); $('#engine-status').textContent = '正在连接本地引擎…';
   try { const info = await engine.connect(); heroesAvailable = info.heroSpells === true; aiAvailable = info.battleAI === "VCMI BattleEvaluator"; townPreset = info.tenWeekTownArmies; if (!$('#hero-configs').children.length) heroEditor($('#hero-configs'), info.spells ?? [], info.skills ?? [], () => void previewDeployment(), info.namedHeroes, info.equipment); readCatalogue(info); }
   catch (error) { connected = false; heroesAvailable = false; aiAvailable = false; townPreset = undefined; nativeCreatures.clear(); $('#engine-status').textContent = error instanceof Error ? error.message : '引擎连接失败'; }
+  if (connected && customPacksAvailable && manifest?.creaturePack) {
+    try {
+      const url = new URL(manifest.creaturePack, location.origin);
+      if (url.origin !== location.origin || !url.pathname.startsWith('/local-assets/')) throw new Error('预装兵种包必须来自本地资源目录。');
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) throw new Error('预装兵种包读取失败，保留原版兵种。');
+      const text = await response.text();
+      if (new TextEncoder().encode(text).length > 1024 * 1024) throw new Error('兵种包不能超过 1 MB。');
+      const pack = parseCreaturePack(JSON.parse(text));
+      const existing = new Set(customArt.map(c => c.art));
+      if (!pack.creatures.every(c => existing.has(c.id))) readCatalogue(await engine.importPack(pack));
+      $('#creature-import-status').textContent = `已载入 ${pack.creatures.length} 个本地自定义兵种，可在阵容中选择。`;
+    } catch (error) {
+      $('#creature-import-status').textContent = error instanceof Error ? error.message : String(error);
+    }
+  }
   busy = false; updateSelection(); await previewDeployment();
 }
 $('#connect-engine').onclick = () => void connect();

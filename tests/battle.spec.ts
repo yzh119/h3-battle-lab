@@ -8,6 +8,42 @@ async function open(page: any) {
   await expect.poll(async () => (await snapshot(page)).draws).toBeGreaterThan(0);
 }
 
+test('local manifest creature pack loads into native catalogue with double-wide deployment', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  const pack = { version: 1, creatures: [{ id: 'local-ring-test', label: '本地环击测试', faction: '自定义', ruleset: 'custom', doubleWide: true,
+    stats: { health: 175, attack: 16, defense: 18, minDamage: 25, maxDamage: 45, speed: 5 },
+    mechanisms: [{ type: 'attacksAllAdjacent' }, { type: 'blocksRetaliation' }] }] };
+  await page.route('**/local-assets/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    const value = path.endsWith('/manifest.json') ? { units: {}, creaturePack: '/local-assets/test-pack.json' } : path.endsWith('/test-pack.json') ? pack : null;
+    return route.fulfill({ status: value ? 200 : 404, contentType: 'application/json', body: JSON.stringify(value) });
+  });
+  await open(page);
+  await expect(page.locator('#engine-status')).toContainText('自定义模式');
+  await expect(page.locator('#creature-import-status')).toContainText('1 个本地自定义兵种');
+  await expect(page.locator('#start-battle')).toBeEnabled();
+  await page.locator('#creature-picker').selectOption('local-ring-test');
+  await page.locator('#replace-unit').click();
+  await expect.poll(async () => (await snapshot(page)).units[0].footprint.length).toBe(2);
+  expect((await snapshot(page)).units[0].imported).toBe(false);
+  await page.locator('#connect-engine').click();
+  await expect(page.locator('#creature-import-status')).toContainText('1 个本地自定义兵种');
+  await expect(page.locator('#start-battle')).toBeEnabled();
+  await expect(page.locator('#creature-picker option')).toHaveCount(29);
+});
+
+test('missing preinstalled creature pack preserves native base catalogue', async ({ page }) => {
+  test.skip(!process.env.BATTLE_LAB_BACKEND || !process.env.BATTLE_LAB_PROFILE, 'Native engine/profile absent');
+  await page.route('**/local-assets/**', route => route.fulfill(new URL(route.request().url()).pathname.endsWith('/manifest.json')
+    ? { status: 200, contentType: 'application/json', body: JSON.stringify({ units: {}, creaturePack: '/local-assets/missing.json' }) }
+    : { status: 404, body: '' }));
+  await open(page);
+  await expect(page.locator('#creature-import-status')).toContainText('读取失败');
+  await expect(page.locator('#engine-status')).toContainText('原版参考模式');
+  await expect(page.locator('#creature-picker option')).toHaveCount(28);
+  await expect(page.locator('#start-battle')).toBeEnabled();
+});
+
 test('public scene renders without art or engine; editing and camera remain available', async ({ page }) => {
   await missingArt(page);
   await page.route('**/api/engine', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: '本地 VCMI 引擎尚未配置' }) }));

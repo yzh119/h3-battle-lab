@@ -47,7 +47,7 @@ Available local manifest entries populate the grouped creature catalogue. Entrie
 
 ## Custom creatures
 
-The **自定义兵种** panel imports a versioned authoring format through an isolated standard VCMI mod. See the [format guide](docs/custom-creatures.md), [JSON Schema](schemas/creature-pack.schema.json) and [example](examples/custom-creatures.json). With a configured native engine and Python 3, imported creatures appear in the selector and can join battles. The converter validates the whole pack, prepares a candidate profile and switches sessions only after successful native initialization. Reset/reconnect preserve imported definitions; a page reload starts from the base profile. Original creature IDs are protected. No TypeScript mechanism interpreter remains.
+The **自定义兵种** panel imports a versioned authoring format through an isolated standard VCMI mod. See the [format guide](docs/custom-creatures.md), [JSON Schema](schemas/creature-pack.schema.json) and [example](examples/custom-creatures.json). With a configured native engine and Python 3, imported creatures appear in the selector and can join battles. The converter validates the whole pack, prepares a candidate profile and switches sessions only after successful native initialization. Reset/reconnect preserve imported definitions; a page reload starts from the base profile and loads any explicitly configured local `creaturePack`. Original creature IDs are protected. No TypeScript mechanism interpreter remains.
 
 ## Local models
 

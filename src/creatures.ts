@@ -7,12 +7,13 @@ export type Mechanism =
   | { type: 'regeneration'; health: number }
   | { type: 'retaliations'; count: number }
   | { type: 'blocksRetaliation' }
+  | { type: 'attacksAllAdjacent' }
   | { type: 'shooter'; shots: number; noMeleePenalty?: boolean; noDistancePenalty?: boolean }
   | { type: 'undead' }
   | { type: 'deathCloud' };
 export interface CreatureDefinition {
   id: string; label: string; faction: string; ruleset: 'h3-base' | 'custom';
-  stats: CreatureStats; mechanisms: Mechanism[];
+  doubleWide?: boolean; stats: CreatureStats; mechanisms: Mechanism[];
 }
 export interface CreaturePack { version: 1; creatures: CreatureDefinition[] }
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -30,11 +31,12 @@ export function parseCreaturePack(value: unknown): CreaturePack {
   for (const [i, entry] of value.creatures.entries()) {
     const path = `creatures[${i}]`;
     if (!object(entry)) throw new Error(`${path}: expected object`);
-    fields(entry, ['id', 'label', 'faction', 'ruleset', 'stats', 'mechanisms'], path);
+    fields(entry, ['id', 'label', 'faction', 'ruleset', 'stats', 'mechanisms', 'doubleWide'], path);
     if (typeof entry.id !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(entry.id) || ids.has(entry.id)) throw new Error(`${path}.id: invalid or duplicate`);
     ids.add(entry.id);
     for (const field of ['label', 'faction']) if (typeof entry[field] !== 'string' || !(entry[field] as string).trim() || (entry[field] as string).length > 80) throw new Error(`${path}.${field}: expected 1–80 characters`);
     if (entry.ruleset !== 'custom') throw new Error(`${path}.ruleset: imported creatures must declare custom`);
+    if (entry.doubleWide !== undefined && typeof entry.doubleWide !== 'boolean') throw new Error(`${path}.doubleWide: expected boolean`);
     if (!object(entry.stats)) throw new Error(`${path}.stats: expected object`);
     fields(entry.stats, ['health', 'attack', 'defense', 'minDamage', 'maxDamage', 'speed', 'aiValue'], `${path}.stats`);
     for (const field of ['health', 'minDamage', 'maxDamage']) integer(entry.stats[field], 1, 100000, `${path}.stats.${field}`);
@@ -49,7 +51,7 @@ export function parseCreaturePack(value: unknown): CreaturePack {
       if (!object(mechanism) || typeof mechanism.type !== 'string' || types.has(mechanism.type)) throw new Error(`${mp}: invalid or duplicate mechanism`);
       types.add(mechanism.type);
       switch (mechanism.type) {
-        case 'flying': case 'blocksRetaliation': case 'undead': case 'deathCloud': fields(mechanism, ['type'], mp); break;
+        case 'flying': case 'attacksAllAdjacent': case 'blocksRetaliation': case 'undead': case 'deathCloud': fields(mechanism, ['type'], mp); break;
         case 'additionalAttacks':
           fields(mechanism, ['type', 'count', 'mode'], mp); integer(mechanism.count, 1, 4, `${mp}.count`);
           if (mechanism.mode !== undefined && !['melee', 'ranged', 'both'].includes(String(mechanism.mode))) throw new Error(`${mp}.mode: expected melee, ranged or both`);

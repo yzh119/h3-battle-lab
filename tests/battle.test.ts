@@ -13,6 +13,16 @@ test('native hex IDs roundtrip through visible coordinates; borders stay reserve
   assert.equal(new Set(creatureArt.map(c => c.id)).size, 28);
 });
 const example = () => JSON.parse(readFileSync(new URL('../examples/custom-creatures.json', import.meta.url), 'utf8'));
+test('custom double-wide ring attacker accepts explicit footprint and rejects malformed flags', () => {
+  const pack = example();
+  pack.creatures[0].doubleWide = true;
+  pack.creatures[0].mechanisms = [{ type: 'attacksAllAdjacent' }, { type: 'blocksRetaliation' }];
+  assert.equal(parseCreaturePack(pack).creatures[0].doubleWide, true);
+  for (const invalid of [0, 1, 'true', null, []]) {
+    pack.creatures[0].doubleWide = invalid;
+    assert.throws(() => parseCreaturePack(pack), /doubleWide/);
+  }
+});
 test('authoring format rejects unknown mechanisms and invalid ranges', () => {
   const pack = example(); assert.equal(parseCreaturePack(pack).version, 1);
   pack.creatures[0].mechanisms = [{ type: 'executeJavaScript' }]; assert.throws(() => parseCreaturePack(pack), /unsupported mechanism/);

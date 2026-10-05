@@ -18,6 +18,17 @@ def creature(identifier='custom-test', mechanisms=None):
 
 
 class CustomPackTests(unittest.TestCase):
+    def test_double_wide_is_explicit_and_rejects_non_booleans(self):
+        entry = creature(mechanisms=[{'type': 'attacksAllAdjacent'}])
+        self.assertFalse(converter.convert({'version': 1, 'creatures': [entry]})['custom-test']['doubleWide'])
+        entry['doubleWide'] = True
+        value = converter.convert({'version': 1, 'creatures': [entry]})['custom-test']
+        self.assertTrue(value['doubleWide'])
+        self.assertEqual(value['abilities']['attacksAllAdjacent'], {'type': 'ATTACKS_ALL_ADJACENT'})
+        for invalid in [0, 1, 'true', None, []]:
+            entry['doubleWide'] = invalid
+            with self.assertRaisesRegex(ValueError, 'doubleWide'): converter.convert({'version': 1, 'creatures': [entry]})
+
     def test_native_bonus_mapping_and_explicit_attack_ranges(self):
         mechanisms = [{'type': 'flying'}, {'type': 'additionalAttacks', 'count': 2, 'mode': 'ranged'},
                       {'type': 'shooter', 'shots': 12, 'noMeleePenalty': True, 'noDistancePenalty': True},
