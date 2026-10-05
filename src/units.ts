@@ -60,7 +60,8 @@ export class UnitView {
   private readonly bases = new THREE.Group();
   private readonly centerOffset = new THREE.Vector3();
   footprint: number[] = [];
-  readonly height: number;
+  height: number;
+  private readonly baseHeight: number;
   readonly proxy: THREE.Mesh;
   readonly ring: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
   readonly countLabel: THREE.Sprite;
@@ -89,6 +90,7 @@ export class UnitView {
   }
   constructor(readonly unit: Unit) {
     this.height = displayHeight[unit.kind] ?? 2.35;
+    this.baseHeight = this.height;
     this.root.add(this.body, this.bases);
     this.dummy = standIn(unit.team, unit.kind); this.model = this.dummy.root; this.body.add(this.model);
     this.root.position.copy(worldPosition(unit.cell)); this.root.rotation.y = unit.team ? -Math.PI / 2 : Math.PI / 2;
@@ -158,7 +160,8 @@ export class UnitView {
     const floor = !mounted && Number.isFinite(toes) ? toes - .025 : box.min.y;
     const bodyHeight = Number.isFinite(crown) && crown > floor ? crown - floor : height;
     const wrapper = new THREE.Group(); model.position.y -= floor;
-    wrapper.add(model); wrapper.scale.setScalar(((asset.height ?? 2.35) * this.height / 2.35) / bodyHeight);
+    const displaySize = (asset.height ?? 2.35) * this.baseHeight / 2.35;
+    wrapper.add(model); wrapper.scale.setScalar(displaySize / bodyHeight);
     const center = bodyCenter ?? box.getCenter(new THREE.Vector3()); model.position.x -= center.x; model.position.z -= center.z;
     // The horse exports face -X; navigation and procedural models face +Z.
     const forward = asset.forward ?? (['cavalier', 'champion'].includes(this.unit.kind) ? '-x' : '+z');
@@ -170,6 +173,8 @@ export class UnitView {
     if (this.mixer) this.mixer.uncacheRoot(this.mixer.getRoot());
     this.disposeDummy();
     this.body.remove(this.model); this.model = wrapper; this.body.add(wrapper); this.dummy = undefined;
+    this.height = displaySize;
+    this.proxy.scale.y = this.height / 2.6; this.proxy.position.y = this.height / 2;
     this.clips = gltf.animations; this.mixer = new THREE.AnimationMixer(model); this.action = undefined;
     const current = this.current, once = this.remaining > 0 || current === 'death';
     this.imported = true; this.sourceRevision = asset.revision; this.current = ''; this.play(this.clips.some(clip => clip.name === current) ? current : 'idle', once);
